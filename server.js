@@ -68,6 +68,7 @@ const decrypt = (encryptedData) => {
 
 // Routes
 app.get("/", (req, res) => {
+  console.log("Root route accessed");
   if (req.isAuthenticated()) {
     res.redirect("/dashboard");
   } else {
@@ -89,12 +90,18 @@ app.get(
   "/auth/discord/callback",
   passport.authenticate("discord", { failureRedirect: "/" }),
   (req, res) => {
+    console.log("Callback triggered, redirecting to dashboard");
     res.redirect("/dashboard");
   }
 );
 
 app.get("/dashboard", (req, res) => {
-  if (!req.isAuthenticated()) return res.redirect("/auth/discord");
+  console.log("Dashboard route accessed");
+  if (!req.isAuthenticated()) {
+    console.log("User not authenticated, redirecting to /auth/discord");
+    return res.redirect("/auth/discord");
+  }
+  console.log("Serving dashboard.html");
   res.sendFile(__dirname + "/public/dashboard.html");
 });
 
