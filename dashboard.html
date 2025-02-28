@@ -25,11 +25,10 @@
     </div>
   </header>
   <div class="layout">
-    <aside class="sidebar">
+    <aside class="sidebar-left">
       <nav>
         <ul>
           <li onclick="showSection('add-friend')">Add Friend</li>
-          <li onclick="showSection('chat')">Chat</li>
           <li onclick="showSection('transfer')">Transfer</li>
           <li onclick="showSection('trans-search')">TransSearch</li>
         </ul>
@@ -39,14 +38,7 @@
       <section id="add-friend" class="card active">
         <h2>Add Friend</h2>
         <input id="friend-id" placeholder="Friend's Discord ID">
-        <button onclick="addFriend()">Add Friend</button>
-      </section>
-      <section id="chat" class="card">
-        <h2>Chat</h2>
-        <input id="chat-to" placeholder="Recipient ID">
-        <input id="chat-msg" placeholder="Type a message">
-        <button onclick="sendChat()">Send</button>
-        <div id="chat-box"></div>
+        <button onclick="addFriend()">Send Request</button>
       </section>
       <section id="transfer" class="card">
         <h2>Transfer</h2>
@@ -59,7 +51,20 @@
         <button onclick="searchTransactions()">Search Transactions</button>
         <div id="trans-list"></div>
       </section>
+      <section id="chat" class="card">
+        <h2>Chat</h2>
+        <input id="chat-to" placeholder="Recipient ID" readonly>
+        <input id="chat-msg" placeholder="Type a message">
+        <button onclick="sendChat()">Send</button>
+        <div id="chat-box"></div>
+      </section>
     </main>
+    <aside class="sidebar-right">
+      <h3>Friends</h3>
+      <div id="friends-list"></div>
+      <h3>Pending Requests</h3>
+      <div id="pending-list"></div>
+    </aside>
   </div>
   <script src="/socket.io/socket.io.js"></script>
   <script src="/script.js"></script>
