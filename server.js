@@ -47,14 +47,14 @@ app.use(express.static("public"));
 
 // Encryption with IV
 const algorithm = "aes-256-cbc";
-const key = Buffer.from(process.env.ENCRYPTION_KEY, "utf8").slice(0, 32); // Ensure key is 32 bytes
+const key = Buffer.from(process.env.ENCRYPTION_KEY, "utf8").slice(0, 32);
 
 const encrypt = (text) => {
-  const iv = crypto.randomBytes(16); // Generate a random IV
+  const iv = crypto.randomBytes(16);
   const cipher = crypto.createCipheriv(algorithm, key, iv);
   let encrypted = cipher.update(text, "utf8", "hex");
   encrypted += cipher.final("hex");
-  return `${iv.toString("hex")}:${encrypted}`; // Store IV with encrypted data
+  return `${iv.toString("hex")}:${encrypted}`;
 };
 
 const decrypt = (encryptedData) => {
@@ -67,6 +67,23 @@ const decrypt = (encryptedData) => {
 };
 
 // Routes
+app.get("/", (req, res) => {
+  if (req.isAuthenticated()) {
+    res.redirect("/dashboard");
+  } else {
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head><title>DISWallet</title></head>
+      <body>
+        <h1>Welcome to DISWallet</h1>
+        <p>Please <a href="/auth/discord">login with Discord</a> to continue.</p>
+      </body>
+      </html>
+    `);
+  }
+});
+
 app.get("/auth/discord", passport.authenticate("discord"));
 app.get(
   "/auth/discord/callback",
@@ -81,8 +98,14 @@ app.get("/dashboard", (req, res) => {
   res.sendFile(__dirname + "/public/dashboard.html");
 });
 
+app.get("/auth/discord/logout", (req, res) => {
+  req.logout((err) => {
+    if (err) return res.status(500).send("Logout failed");
+    res.redirect("/");
+  });
+});
+
 // API Endpoints
-// Inside server.js, update the /api/user endpoint
 app.get("/api/user", async (req, res) => {
   if (!req.isAuthenticated()) return res.status(401).send("Unauthorized");
   const userRef = doc(db, "users", req.user.id);
@@ -94,16 +117,8 @@ app.get("/api/user", async (req, res) => {
   res.json({
     id: req.user.id,
     username: req.user.username,
-    avatar: req.user.avatar, // Add avatar hash
+    avatar: req.user.avatar,
     balance: decrypt(data.balance),
-  });
-});
-
-// Add logout route
-app.get("/auth/discord/logout", (req, res) => {
-  req.logout((err) => {
-    if (err) return res.status(500).send("Logout failed");
-    res.redirect("/");
   });
 });
 
@@ -151,7 +166,8 @@ app.get("/api/transactions", async (req, res) => {
 });
 
 // Start Server
-const server = app.listen(process.env.PORT, () => console.log(`Server running on port ${process.env.PORT}`));
+const port = process.env.PORT || 3000; // Use Render's PORT or default to 3000
+const server = app.listen(port, () => console.log(`Server running on port ${port}`));
 const io = socketIo(server);
 
 // Real-Time Chat
