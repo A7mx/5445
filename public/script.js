@@ -9,18 +9,20 @@ function refreshUserData() {
     .then((data) => {
       if (!data.success) throw new Error(data.message || "Failed to fetch user data");
       userData = data;
-      console.log("Client received user data:", data);
-      document.getElementById("avatar").src = userData.avatar ? `https://cdn.discordapp.com/avatars/${userData.id}/${userData.avatar}.png` : "https://cdn.discordapp.com/embed/avatars/0.png";
-      document.getElementById("username").textContent = userData.username || "Unknown";
-      document.getElementById("discord-id").textContent = `ID: ${userData.id}`;
-      document.getElementById("balance-amount").textContent = `${userData.balance} DIS`;
-      document.getElementById("wallet-id").textContent = userData.walletId;
+      updateUI();
       socket.emit("join", userData.id);
       updateFriendsList();
       updateQRCode();
-      showSuccess("Dashboard updated successfully.");
     })
     .catch((error) => showError("Error fetching user data: " + error.message));
+}
+
+function updateUI() {
+  document.getElementById("avatar").src = userData.avatar ? `https://cdn.discordapp.com/avatars/${userData.id}/${userData.avatar}.png` : "https://cdn.discordapp.com/embed/avatars/0.png";
+  document.getElementById("username").textContent = userData.username || "Unknown";
+  document.getElementById("discord-id").textContent = `ID: ${userData.id}`;
+  document.getElementById("balance-amount").textContent = `${userData.balance} DIS`;
+  document.getElementById("wallet-id").textContent = userData.walletId;
 }
 
 function updateFriendsList() {
@@ -78,7 +80,6 @@ function toggleDeposit() {
 
 function deposit() {
   showSection("deposit");
-  showSuccess("Navigate to the Deposit section to add funds.");
 }
 
 function depositFunds() {
@@ -96,7 +97,7 @@ function depositFunds() {
     .then((data) => {
       if (data.success) {
         showSuccess(data.message);
-        refreshUserData();
+        updateUI();
         document.getElementById("deposit-amount").value = "";
       } else {
         showError(data.message);
@@ -136,7 +137,7 @@ function transferFunds() {
     .then((data) => {
       if (data.success) {
         showSuccess(data.message);
-        refreshUserData();
+        updateUI();
         document.getElementById("transfer-to-wallet").value = "";
         document.getElementById("transfer-amount").value = "";
       } else {
@@ -166,13 +167,13 @@ function withdrawFunds() {
     .then((data) => {
       if (data.success) {
         showSuccess(data.message);
+        updateUI();
         document.getElementById("withdraw-amount").value = "";
         document.getElementById("withdrawal-wallet").value = "";
         document.getElementById("withdraw-qr").src = data.qrCode;
       } else {
         showError(data.message);
       }
-      refreshUserData();
     })
     .catch((error) => showError("Withdrawal failed: " + error.message));
 }
@@ -188,8 +189,8 @@ function addFriend() {
     .then((data) => {
       if (data.success) {
         showSuccess(data.message);
+        updateFriendsList();
         document.getElementById("friend-id").value = "";
-        refreshUserData();
       } else {
         showError(data.message);
       }
@@ -207,7 +208,7 @@ function acceptFriend(friendId) {
     .then((data) => {
       if (data.success) {
         showSuccess(data.message);
-        refreshUserData();
+        updateFriendsList();
       } else {
         showError(data.message);
       }
@@ -225,7 +226,7 @@ function ignoreFriend(friendId) {
     .then((data) => {
       if (data.success) {
         showSuccess(data.message);
-        refreshUserData();
+        updateFriendsList();
       } else {
         showError(data.message);
       }
@@ -279,7 +280,6 @@ function sendChat() {
   if (message) {
     socket.emit("chat", { toId: currentChatId, message });
     document.getElementById("chat-input").value = "";
-    showSuccess("Message sent successfully.");
   }
 }
 
@@ -290,7 +290,15 @@ socket.on("chat", ({ from, message }) => {
     if (noMessages) noMessages.remove();
     chatBox.innerHTML += `<p>${from === userData.id ? "You" : from}: ${message}</p>`;
     chatBox.scrollTop = chatBox.scrollHeight;
-    showSuccess("New message received.");
+  }
+});
+
+socket.on("transfer", (data) => {
+  if (data.walletId === userData.walletId || data.fromWalletId === userData.walletId || data.toWalletId === userData.walletId) {
+    refreshUserData();
+    if (data.type === "peer" || data.type === "owner" || data.type === "deposit" || data.type === "withdrawal") {
+      searchTransactions(); // Update transactions in real-time
+    }
   }
 });
 
@@ -301,19 +309,18 @@ function searchTransactions() {
       if (!data.success) throw new Error(data.message || "Failed to fetch transactions");
       const transList = document.getElementById("trans-list");
       transList.innerHTML = data.transactions
-        .map((t) => `<p>From Wallet: ${t.fromWalletId}, To Wallet: ${t.toWalletId}, Amount: ${t.amount} DIS, Time: ${new Date(t.timestamp.seconds * 1000)}${t.type === "owner_transfer" ? " (To Owner)" : ""}</p>`)
+        .map((t) => `<p>From Wallet: ${t.fromWalletId}, To Wallet: ${t.toWalletId}, Amount: ${t.amount} DIS, Time: ${new Date(t.timestamp.seconds * 1000)}${t.type === "owner_transfer" ? " (To Owner)" : t.type === "withdrawal" ? ` (Fee: ${t.fee} DIS)` : ""}</p>`)
         .join("");
-      showSuccess("Transactions loaded successfully.");
     })
     .catch((error) => showError("Error fetching transactions: " + error.message));
 }
 
 function showSuccess(message) {
-  alert(message); // For simplicity; use a modal or toast for production
+  alert(message); // Retain for errors/success, but remove "Dashboard updated successfully."
 }
 
 function showError(message) {
-  alert(message); // For simplicity; use a modal or toast for production
+  alert(message);
 }
 
 showSection("deposit");
