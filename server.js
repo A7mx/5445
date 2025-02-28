@@ -5,10 +5,10 @@ const DiscordStrategy = require("passport-discord").Strategy;
 const { initializeApp } = require("firebase/app");
 const { getFirestore, doc, getDoc, setDoc, updateDoc, arrayUnion, arrayRemove, collection, where, query, getDocs, serverTimestamp, orderBy, limit } = require("firebase/firestore");
 const crypto = require("crypto");
-const { v4: uuidv4 } = require("uuid"); // npm install uuid
+const { v4: uuidv4 } = require("uuid");
 const socketIo = require("socket.io");
 const path = require("path");
-const QRCode = require("qrcode"); // npm install qrcode
+const QRCode = require("qrcode");
 const app = express();
 
 // Firebase Config
@@ -67,7 +67,6 @@ const decrypt = (encryptedData) => {
   return decrypted;
 };
 
-// Generate a secure, difficult-to-track wallet ID (64-char hex + base64 for extra obfuscation)
 function generateSecureWalletId() {
   const randomBytes = crypto.randomBytes(32); // 256 bits
   const hex = randomBytes.toString("hex"); // 64 characters
@@ -95,7 +94,7 @@ app.get("/", (req, res) => {
         <nav>
           <a href="#features">Features</a>
           <a href="#security">Security</a>
-          <a href="/auth/discord">Login with Discord</a>
+          <a href="/auth/discord" class="login-link">Login with Discord</a>
         </nav>
       </header>
       <section class="hero">
@@ -547,30 +546,6 @@ app.get("/api/transactions", async (req, res) => {
     res.json({ success: true, transactions });
   } catch (error) {
     console.error("Error in /api/transactions:", error);
-    res.status(500).json({ success: false, message: "Internal Server Error" });
-  }
-});
-
-app.get("/api/chat/:friendId", async (req, res) => {
-  if (!req.isAuthenticated()) return res.status(401).json({ success: false, message: "Unauthorized" });
-  try {
-    const userId = req.user.id;
-    const chatRef = collection(db, "chats");
-    const chatQuery = query(
-      chatRef,
-      where("userIds", "array-contains", userId),
-      orderBy("timestamp", "desc"),
-      limit(50)
-    );
-    const chatDocs = await getDocs(chatQuery);
-    const messages = chatDocs.docs
-      .map((doc) => doc.data())
-      .filter((msg) => msg.userIds.includes(req.params.friendId))
-      .sort((a, b) => a.timestamp?.seconds - b.timestamp?.seconds || 0);
-    console.log(`Chat history fetched for ${userId} and ${req.params.friendId}:`, messages);
-    res.json({ success: true, messages });
-  } catch (error) {
-    console.error("Error in /api/chat:", error);
     res.status(500).json({ success: false, message: "Internal Server Error" });
   }
 });
