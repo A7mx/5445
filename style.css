@@ -6,9 +6,10 @@
   
   body {
     font-family: 'Roboto', sans-serif;
-    background: linear-gradient(135deg, #1e3c72, #2a5298);
-    color: #333;
+    background: #1a1a1a;
+    color: #fff;
     min-height: 100vh;
+    line-height: 1.6;
   }
   
   header {
@@ -16,14 +17,14 @@
     justify-content: space-between;
     align-items: center;
     padding: 15px 30px;
-    background: #fff;
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+    background: #2a5298;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
   }
   
   #logo {
     font-family: 'Orbitron', sans-serif;
     font-size: 32px;
-    color: #2a5298;
+    color: #fff;
   }
   
   #user-profile {
@@ -41,17 +42,22 @@
   #balance-amount {
     font-size: 16px;
     font-weight: 700;
-    color: #2a5298;
+    color: #fff;
     padding: 5px 10px;
-    background: #e6f0fa;
+    background: #3a6ea5;
     border-radius: 5px;
+    transition: background 0.3s;
+  }
+  
+  #balance-amount:hover {
+    background: #4a7eb5;
   }
   
   #deposit-option {
     position: absolute;
     top: 40px;
     right: 0;
-    background: #fff;
+    background: #2a5298;
     padding: 10px;
     border-radius: 8px;
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
@@ -70,6 +76,7 @@
     border-radius: 5px;
     cursor: pointer;
     font-weight: 700;
+    transition: background 0.3s;
   }
   
   #deposit-option button:hover {
@@ -81,14 +88,14 @@
     height: 40px;
     border-radius: 50%;
     cursor: pointer;
-    border: 2px solid #2a5298;
+    border: 2px solid #fff;
   }
   
   #user-info {
     position: absolute;
     top: 50px;
     right: 0;
-    background: #fff;
+    background: #2a5298;
     padding: 15px;
     border-radius: 8px;
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
@@ -103,7 +110,7 @@
     display: block;
     margin: 5px 0;
     font-size: 14px;
-    color: #333;
+    color: #fff;
   }
   
   #logout {
@@ -115,6 +122,7 @@
     cursor: pointer;
     font-weight: 700;
     margin-top: 10px;
+    transition: background 0.3s;
   }
   
   #logout:hover {
@@ -124,32 +132,33 @@
   .layout {
     display: flex;
     height: calc(100vh - 70px);
+    position: relative;
   }
   
-  .sidebar-left {
-    width: 200px;
-    background: #fff;
+  .sidebar {
+    width: 250px;
+    background: #2a2a2a;
     padding: 20px;
     box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
   }
   
-  .sidebar-left nav ul {
+  .sidebar nav ul {
     list-style: none;
   }
   
-  .sidebar-left nav ul li {
+  .sidebar nav ul li {
     padding: 15px;
     font-size: 16px;
-    color: #2a5298;
+    color: #fff;
     cursor: pointer;
     border-radius: 5px;
     margin-bottom: 10px;
     transition: background 0.3s;
   }
   
-  .sidebar-left nav ul li:hover,
-  .sidebar-left nav ul li.active {
-    background: #2a5298;
+  .sidebar nav ul li:hover,
+  .sidebar nav ul li.active {
+    background: #3a6ea5;
     color: #fff;
   }
   
@@ -157,15 +166,17 @@
     flex: 1;
     padding: 30px;
     overflow-y: auto;
+    background: #1a1a1a;
   }
   
   .card {
-    background: #fff;
+    background: #2a2a2a;
     padding: 20px;
     border-radius: 10px;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
     margin-bottom: 20px;
     display: none;
+    color: #fff;
   }
   
   .card.active {
@@ -173,8 +184,9 @@
   }
   
   .card h2 {
-    color: #2a5298;
+    color: #3a6ea5;
     margin-bottom: 15px;
+    font-size: 24px;
   }
   
   input,
@@ -185,14 +197,18 @@
     margin: 10px 0;
     border-radius: 5px;
     font-size: 14px;
+    border: 1px solid #444;
+    background: #3a3a3a;
+    color: #fff;
   }
   
-  input {
-    border: 1px solid #ccc;
+  input:focus {
+    outline: none;
+    border-color: #3a6ea5;
   }
   
   button {
-    background: #2a5298;
+    background: #3a6ea5;
     color: #fff;
     border: none;
     cursor: pointer;
@@ -201,93 +217,161 @@
   }
   
   button:hover {
-    background: #1e3c72;
+    background: #4a7eb5;
   }
   
-  #chat-box,
-  #trans-list {
-    border: 1px solid #ddd;
+  #trans-list, #chat-box {
+    border: 1px solid #444;
     padding: 10px;
     max-height: 300px;
     overflow-y: auto;
-    background: #f9f9f9;
+    background: #3a3a3a;
     border-radius: 5px;
+    color: #fff;
   }
   
-  #chat-box p,
-  #trans-list p {
+  #trans-list p, #chat-box p {
     margin: 5px 0;
     font-size: 14px;
   }
   
-  .sidebar-right {
-    width: 250px;
-    background: #1a1a1a;
-    color: #fff;
-    padding: 20px;
-    box-shadow: -2px 0 10px rgba(0, 0, 0, 0.1);
-    overflow-y: auto;
-  }
-  
-  .sidebar-right h3 {
-    font-size: 18px;
-    margin-bottom: 15px;
-    color: #66ccff;
-  }
-  
-  .sidebar-right .friend-item,
-  .sidebar-right .pending-item {
-    display: flex;
-    align-items: center;
-    padding: 10px;
-    margin-bottom: 10px;
-    background: #2a2a2a;
+  #qr-code, #withdraw-qr {
+    max-width: 200px;
+    margin: 10px 0;
     border-radius: 5px;
-    cursor: pointer;
-    transition: background 0.3s;
   }
   
-  .sidebar-right .friend-item:hover {
+  .tip {
+    font-size: 12px;
+    color: #999;
+    margin-top: 10px;
+  }
+  
+  .chat-panel {
+    position: fixed;
+    top: 70px;
+    right: -400px;
+    width: 400px;
+    height: calc(100vh - 70px);
+    background: #2a2a2a;
+    box-shadow: -2px 0 10px rgba(0, 0, 0, 0.2);
+    transition: right 0.3s ease;
+    z-index: 100;
+    border-radius: 10px 0 0 10px;
+    overflow: hidden;
+    color: #fff;
+  }
+  
+  .chat-panel.open {
+    right: 0;
+  }
+  
+  .chat-panel.hidden {
+    right: -400px;
+  }
+  
+  #chat-header {
+    padding: 15px;
+    background: #3a6ea5;
+    color: #fff;
+    font-size: 18px;
+    font-weight: 700;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #444;
+  }
+  
+  #chat-with {
+    flex: 1;
+  }
+  
+  #chat-close {
+    background: none;
+    border: none;
+    color: #fff;
+    font-size: 16px;
+    cursor: pointer;
+    padding: 5px;
+  }
+  
+  #chat-box {
+    padding: 20px;
+    height: calc(100% - 120px);
+    overflow-y: auto;
     background: #3a3a3a;
   }
   
-  .sidebar-right .pending-item {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-  
-  .sidebar-right .friend-item img,
-  .sidebar-right .pending-item img {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    margin-right: 10px;
-  }
-  
-  .sidebar-right .friend-item span,
-  .sidebar-right .pending-item span {
-    flex: 1;
+  #chat-box p {
+    margin: 5px 0;
     font-size: 14px;
+    word-wrap: break-word;
+    color: #fff;
   }
   
-  .sidebar-right .pending-item button {
-    width: auto;
-    padding: 5px 10px;
-    margin: 5px 5px 0 0;
+  #no-messages {
+    color: #999;
+    font-style: italic;
+    text-align: center;
+    padding: 20px;
   }
   
-  .sidebar-right .pending-item button.accept {
-    background: #27ae60;
+  #chat-input {
+    width: 70%;
+    padding: 10px;
+    margin: 10px;
+    border: 1px solid #444;
+    border-radius: 5px;
+    font-size: 14px;
+    background: #3a3a3a;
+    color: #fff;
   }
   
-  .sidebar-right .pending-item button.accept:hover {
-    background: #219653;
+  #chat-input:focus {
+    outline: none;
+    border-color: #3a6ea5;
   }
   
-  .sidebar-right .pending-item button.ignore {
-    background: #e74c3c;
+  #chat-send {
+    width: 20%;
+    padding: 10px;
+    margin: 10px;
+    background: #3a6ea5;
+    color: #fff;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-weight: 700;
+    transition: background 0.3s;
+    vertical-align: top;
   }
   
-  .sidebar-right .pending-item button.ignore:hover {
-    background: #c0392b;
+  #chat-send:hover {
+    background: #4a7eb5;
+  }
+  
+  footer {
+    background: #2a2a2a;
+    padding: 20px;
+    text-align: center;
+    color: #999;
+    box-shadow: 0 -4px 10px rgba(0, 0, 0, 0.2);
+  }
+  
+  footer p {
+    margin-bottom: 10px;
+  }
+  
+  footer a {
+    color: #3a6ea5;
+    text-decoration: none;
+  }
+  
+  footer a:hover {
+    text-decoration: underline;
+  }
+  
+  .trust-badges {
+    max-width: 200px;
+    margin-top: 10px;
   }
