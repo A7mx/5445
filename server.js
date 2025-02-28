@@ -102,7 +102,7 @@ app.get("/dashboard", (req, res) => {
     return res.redirect("/auth/discord");
   }
   console.log("Serving dashboard.html");
-  res.sendFile(__dirname + "/public/dashboard.html");
+  res.sendFile(require("path").join(__dirname, "public", "dashboard.html"));
 });
 
 app.get("/auth/discord/logout", (req, res) => {
