@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>DISWallet</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron&family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <header>
+    <h1 id="logo">DISWallet</h1>
+    <div id="user-profile">
+      <div id="balance" onclick="toggleDeposit()">
+        <span id="balance-amount"></span>
+        <div id="deposit-option" class="hidden">
+          <button onclick="deposit()">Deposit</button>
+        </div>
+      </div>
+      <img id="avatar" src="" alt="Avatar" onclick="toggleUserInfo()">
+      <div id="user-info" class="hidden">
+        <span id="username"></span>
+        <span id="discord-id"></span>
+        <button id="logout" onclick="window.location.href='/auth/discord/logout'">LOGOUT</button>
+      </div>
+    </div>
+  </header>
+  <div class="layout">
+    <aside class="sidebar">
+      <nav>
+        <ul>
+          <li onclick="showSection('add-friend')">Add Friend</li>
+          <li onclick="showSection('chat')">Chat</li>
+          <li onclick="showSection('transfer')">Transfer</li>
+          <li onclick="showSection('trans-search')">TransSearch</li>
+        </ul>
+      </nav>
+    </aside>
+    <main class="content">
+      <section id="add-friend" class="card active">
+        <h2>Add Friend</h2>
+        <input id="friend-id" placeholder="Friend's Discord ID">
+        <button onclick="addFriend()">Add Friend</button>
+      </section>
+      <section id="chat" class="card">
+        <h2>Chat</h2>
+        <input id="chat-to" placeholder="Recipient ID">
+        <input id="chat-msg" placeholder="Type a message">
+        <button onclick="sendChat()">Send</button>
+        <div id="chat-box"></div>
+      </section>
+      <section id="transfer" class="card">
+        <h2>Transfer</h2>
+        <input id="transfer-to" placeholder="Recipient ID">
+        <input id="transfer-amount" type="number" placeholder="Amount">
+        <button onclick="transfer()">Transfer</button>
+      </section>
+      <section id="trans-search" class="card">
+        <h2>TransSearch</h2>
+        <button onclick="searchTransactions()">Search Transactions</button>
+        <div id="trans-list"></div>
+      </section>
+    </main>
+  </div>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>

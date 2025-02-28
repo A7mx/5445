@@ -1,0 +1,221 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+  
+  body {
+    font-family: 'Roboto', sans-serif;
+    background: linear-gradient(135deg, #1e3c72, #2a5298);
+    color: #333;
+    min-height: 100vh;
+  }
+  
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px 30px;
+    background: #fff;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+  }
+  
+  #logo {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 32px;
+    color: #2a5298;
+  }
+  
+  #user-profile {
+    display: flex;
+    align-items: center;
+    position: relative;
+  }
+  
+  #balance {
+    margin-right: 15px;
+    cursor: pointer;
+    position: relative;
+  }
+  
+  #balance-amount {
+    font-size: 16px;
+    font-weight: 700;
+    color: #2a5298;
+    padding: 5px 10px;
+    background: #e6f0fa;
+    border-radius: 5px;
+  }
+  
+  #deposit-option {
+    position: absolute;
+    top: 40px;
+    right: 0;
+    background: #fff;
+    padding: 10px;
+    border-radius: 8px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+    z-index: 10;
+  }
+  
+  #deposit-option.hidden {
+    display: none;
+  }
+  
+  #deposit-option button {
+    background: #27ae60;
+    color: #fff;
+    border: none;
+    padding: 8px 15px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-weight: 700;
+  }
+  
+  #deposit-option button:hover {
+    background: #219653;
+  }
+  
+  #avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid #2a5298;
+  }
+  
+  #user-info {
+    position: absolute;
+    top: 50px;
+    right: 0;
+    background: #fff;
+    padding: 15px;
+    border-radius: 8px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+    z-index: 10;
+  }
+  
+  #user-info.hidden {
+    display: none;
+  }
+  
+  #username, #discord-id {
+    display: block;
+    margin: 5px 0;
+    font-size: 14px;
+    color: #333;
+  }
+  
+  #logout {
+    background: #e74c3c;
+    color: #fff;
+    border: none;
+    padding: 8px 15px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-weight: 700;
+    margin-top: 10px;
+  }
+  
+  #logout:hover {
+    background: #c0392b;
+  }
+  
+  .layout {
+    display: flex;
+    height: calc(100vh - 70px);
+  }
+  
+  .sidebar {
+    width: 250px;
+    background: #fff;
+    padding: 20px;
+    box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+  }
+  
+  .sidebar nav ul {
+    list-style: none;
+  }
+  
+  .sidebar nav ul li {
+    padding: 15px;
+    font-size: 16px;
+    color: #2a5298;
+    cursor: pointer;
+    border-radius: 5px;
+    margin-bottom: 10px;
+    transition: background 0.3s;
+  }
+  
+  .sidebar nav ul li:hover,
+  .sidebar nav ul li.active {
+    background: #2a5298;
+    color: #fff;
+  }
+  
+  .content {
+    flex: 1;
+    padding: 30px;
+    overflow-y: auto;
+  }
+  
+  .card {
+    background: #fff;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    margin-bottom: 20px;
+    display: none;
+  }
+  
+  .card.active {
+    display: block;
+  }
+  
+  .card h2 {
+    color: #2a5298;
+    margin-bottom: 15px;
+  }
+  
+  input,
+  button {
+    display: block;
+    width: 100%;
+    padding: 12px;
+    margin: 10px 0;
+    border-radius: 5px;
+    font-size: 14px;
+  }
+  
+  input {
+    border: 1px solid #ccc;
+  }
+  
+  button {
+    background: #2a5298;
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    font-weight: 700;
+    transition: background 0.3s;
+  }
+  
+  button:hover {
+    background: #1e3c72;
+  }
+  
+  #chat-box,
+  #trans-list {
+    border: 1px solid #ddd;
+    padding: 10px;
+    max-height: 300px;
+    overflow-y: auto;
+    background: #f9f9f9;
+    border-radius: 5px;
+  }
+  
+  #chat-box p,
+  #trans-list p {
+    margin: 5px 0;
+    font-size: 14px;
+  }
