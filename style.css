@@ -126,18 +126,18 @@
     height: calc(100vh - 70px);
   }
   
-  .sidebar {
-    width: 250px;
+  .sidebar-left {
+    width: 200px;
     background: #fff;
     padding: 20px;
     box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
   }
   
-  .sidebar nav ul {
+  .sidebar-left nav ul {
     list-style: none;
   }
   
-  .sidebar nav ul li {
+  .sidebar-left nav ul li {
     padding: 15px;
     font-size: 16px;
     color: #2a5298;
@@ -147,8 +147,8 @@
     transition: background 0.3s;
   }
   
-  .sidebar nav ul li:hover,
-  .sidebar nav ul li.active {
+  .sidebar-left nav ul li:hover,
+  .sidebar-left nav ul li.active {
     background: #2a5298;
     color: #fff;
   }
@@ -218,4 +218,76 @@
   #trans-list p {
     margin: 5px 0;
     font-size: 14px;
+  }
+  
+  .sidebar-right {
+    width: 250px;
+    background: #1a1a1a;
+    color: #fff;
+    padding: 20px;
+    box-shadow: -2px 0 10px rgba(0, 0, 0, 0.1);
+    overflow-y: auto;
+  }
+  
+  .sidebar-right h3 {
+    font-size: 18px;
+    margin-bottom: 15px;
+    color: #66ccff;
+  }
+  
+  .sidebar-right .friend-item,
+  .sidebar-right .pending-item {
+    display: flex;
+    align-items: center;
+    padding: 10px;
+    margin-bottom: 10px;
+    background: #2a2a2a;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background 0.3s;
+  }
+  
+  .sidebar-right .friend-item:hover {
+    background: #3a3a3a;
+  }
+  
+  .sidebar-right .pending-item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .sidebar-right .friend-item img,
+  .sidebar-right .pending-item img {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    margin-right: 10px;
+  }
+  
+  .sidebar-right .friend-item span,
+  .sidebar-right .pending-item span {
+    flex: 1;
+    font-size: 14px;
+  }
+  
+  .sidebar-right .pending-item button {
+    width: auto;
+    padding: 5px 10px;
+    margin: 5px 5px 0 0;
+  }
+  
+  .sidebar-right .pending-item button.accept {
+    background: #27ae60;
+  }
+  
+  .sidebar-right .pending-item button.accept:hover {
+    background: #219653;
+  }
+  
+  .sidebar-right .pending-item button.ignore {
+    background: #e74c3c;
+  }
+  
+  .sidebar-right .pending-item button.ignore:hover {
+    background: #c0392b;
   }
