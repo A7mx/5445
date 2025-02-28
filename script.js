@@ -1,14 +1,18 @@
 const socket = io();
 
-fetch("/api/user")
-  .then((res) => res.json())
-  .then((data) => {
-    document.getElementById("avatar").src = `https://cdn.discordapp.com/avatars/${data.id}/${data.avatar}.png`;
-    document.getElementById("username").textContent = data.username;
-    document.getElementById("discord-id").textContent = `ID: ${data.id}`;
-    document.getElementById("balance-amount").textContent = `${data.balance} DIS`;
-    socket.emit("join", data.id);
-  });
+function refreshUserData() {
+  fetch("/api/user")
+    .then((res) => res.json())
+    .then((data) => {
+      document.getElementById("avatar").src = `https://cdn.discordapp.com/avatars/${data.id}/${data.avatar}.png`;
+      document.getElementById("username").textContent = data.username;
+      document.getElementById("discord-id").textContent = `ID: ${data.id}`;
+      document.getElementById("balance-amount").textContent = `${data.balance} DIS`;
+      socket.emit("join", data.id);
+    });
+}
+
+refreshUserData(); // Initial load
 
 function toggleUserInfo() {
   const userInfo = document.getElementById("user-info");
@@ -21,7 +25,7 @@ function toggleDeposit() {
 }
 
 function deposit() {
-  alert("Deposit feature coming soon!"); // Placeholder for deposit logic
+  alert("Deposit feature coming soon!");
 }
 
 function showSection(sectionId) {
@@ -37,7 +41,10 @@ function addFriend() {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ friendId }),
-  }).then(() => alert("Friend added!"));
+  }).then(() => {
+    alert("Friend added!");
+    document.getElementById("friend-id").value = "";
+  });
 }
 
 function sendChat() {
@@ -62,7 +69,12 @@ function transfer() {
     body: JSON.stringify({ toId, amount: parseInt(amount) }),
   })
     .then((res) => res.json())
-    .then((data) => alert(`Transfer successful! Transaction ID: ${data.transId}`));
+    .then((data) => {
+      alert(`Transfer successful! Transaction ID: ${data.transId}`);
+      document.getElementById("transfer-to").value = "";
+      document.getElementById("transfer-amount").value = "";
+      refreshUserData(); // Refresh balance after transfer
+    });
 }
 
 function searchTransactions() {
@@ -76,5 +88,4 @@ function searchTransactions() {
     });
 }
 
-// Show Add Friend section by default
 showSection("add-friend");
