@@ -40,7 +40,7 @@ let provider, wallet;
 
         // Initialize Ethereum provider and wallet with your provided private key
         const infuraUrl = `https://mainnet.infura.io/v3/${process.env.INFURA_PROJECT_ID}`;
-        provider = new ethers.JsonRpcProvider(infuraUrl); // Use Infura for Ethereum Mainnet with explicit URL
+        provider = new ethers.JsonRpcProvider(infuraUrl); // Use Infura for Ethereum Mainnet with your project ID
         wallet = new ethers.Wallet(process.env.ETH_PRIVATE_KEY, provider);
         const ownerAddress = await wallet.getAddress();
         process.env.OWNER_ETH_WALLET = ownerAddress; // Set or verify OWNER_ETH_WALLET
