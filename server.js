@@ -17,7 +17,12 @@ requiredEnv.forEach(key => {
     }
 });
 
+// Ensure ENCRYPTION_KEY is 32 bytes (64 hex characters)
 const ENCRYPTION_KEY = Buffer.from(process.env.ENCRYPTION_KEY, 'hex');
+if (ENCRYPTION_KEY.length !== 32) {
+    console.error('ENCRYPTION_KEY must be 32 bytes (64 hex characters). Current length:', ENCRYPTION_KEY.length);
+    process.exit(1);
+}
 const IV_LENGTH = 16;
 
 function encrypt(text) {
@@ -76,7 +81,7 @@ function generateWalletId() {
 async function authenticateToken(req, res, next) {
     const token = req.headers['authorization']?.split(' ')[1];
     if (!token) {
-        console.log('No token provided in request');
+        console.log('No token provided');
         return res.status(401).json({ error: 'Unauthorized' });
     }
     try {
@@ -89,7 +94,7 @@ async function authenticateToken(req, res, next) {
         console.log('Authenticated user:', req.user.userId);
         next();
     } catch (error) {
-        console.error('Authentication error:', error);
+        console.error('Auth error:', error);
         res.status(500).json({ error: 'Server error' });
     }
 }
@@ -105,7 +110,7 @@ app.get('/auth/discord', (req, res) => {
         scope: ['identify', 'email'],
         redirectUri: process.env.DISCORD_REDIRECT_URI,
     });
-    console.log('Redirecting to Discord OAuth:', url);
+    console.log('Redirecting to Discord:', url);
     res.redirect(url);
 });
 
@@ -186,10 +191,7 @@ app.get('/auth/discord/callback', async (req, res) => {
 app.post('/api/user', authenticateToken, async (req, res) => {
     try {
         const userDoc = await getDoc(doc(db, 'users', req.user.userId));
-        if (!userDoc.exists()) {
-            console.log('User not found:', req.user.userId);
-            return res.status(404).json({ error: 'User not found' });
-        }
+        if (!userDoc.exists()) return res.status(404).json({ error: 'User not found' });
         const data = userDoc.data();
         const friendsData = await Promise.all((data.friends || []).map(async friendId => {
             const friendDoc = await getDoc(doc(db, 'users', friendId));
@@ -218,6 +220,7 @@ app.post('/api/user', authenticateToken, async (req, res) => {
 
 app.get('/api/owner-wallet', (req, res) => {
     const ownerWallet = process.env.OWNER_USDT_WALLET;
+    console.log('Returning owner wallet:', ownerWallet);
     res.json({ wallet: ownerWallet, qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${ownerWallet}` });
 });
 
@@ -230,7 +233,7 @@ app.post('/api/deposit', authenticateToken, async (req, res) => {
         const currentBalance = parseFloat(decrypt(userDoc.data().balance));
         const newBalance = currentBalance + amount;
         await updateDoc(userDocRef, { balance: encrypt(newBalance.toString()) });
-        res.json({ success: true, message: `Deposit of ${amount} USDT requested. Please send to owner wallet and await confirmation.` });
+        res.json({ success: true, message: `Deposit of ${amount} USDT requested. Please send to owner wallet: ${process.env.OWNER_USDT_WALLET} and await confirmation.` });
     } catch (error) {
         console.error('Deposit error:', error);
         res.status(500).json({ error: 'Deposit error' });
@@ -375,5 +378,5 @@ io.on('connection', socket => {
     });
 });
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
