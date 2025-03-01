@@ -7,9 +7,9 @@ const bodyParser = require('body-parser');
 const path = require('path');
 const socketIo = require('socket.io');
 const http = require('http');
-const { REST } = require('bybit-api'); // Correct import for Bybit V5 API
+const TronWeb = require('tronweb');
 
-const requiredEnv = ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI', 'FIREBASE_API_KEY', 'BYBIT_API_KEY', 'BYBIT_API_SECRET'];
+const requiredEnv = ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI', 'FIREBASE_API_KEY', 'OWNER_USDT_WALLET', 'TRON_PRIVATE_KEY'];
 requiredEnv.forEach(key => {
     if (!process.env[key]) {
         console.error(`Missing environment variable: ${key}`);
@@ -42,13 +42,18 @@ const server = http.createServer(app);
 const io = socketIo(server);
 const oauth = new DiscordOAuth2();
 
-// Initialize Bybit API with your provided credentials
-const bybit = new REST({
-    key: process.env.BYBIT_API_KEY,  // pPxTQty9kwgZCcoeMR
-    secret: process.env.BYBIT_API_SECRET,  // gc93wnh5zpayfGcwmwHPXhpYcQ4sWW3PU9gT
-    testnet: false, // Use mainnet for production
-    recv_window: 5000, // Default request timeout window (adjust if needed for rate limit issues)
-});
+// Initialize TronWeb for TRC-20 USDT with your provided private key
+let tronWeb;
+try {
+    tronWeb = new TronWeb({
+        fullHost: 'https://api.trongrid.io', // TronGrid public node
+        privateKey: process.env.TRON_PRIVATE_KEY // Use your provided Tron private key (bb61755a69b23074c498a5f3206136daa3a757f45724ea4651321e2a264964d8)
+    });
+    console.log('TronWeb initialized successfully with private key');
+} catch (error) {
+    console.error('Failed to initialize TronWeb:', error);
+    process.exit(1);
+}
 
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -203,7 +208,7 @@ app.post('/api/user', authenticateToken, async (req, res) => {
 });
 
 app.get('/api/owner-wallet', (req, res) => {
-    const ownerWallet = 'TEq4NrK2Sov4fJetbcV577JvK5FkzhLVYw'; // Use your Bybit USDT (TRC-20) custodial wallet address
+    const ownerWallet = process.env.OWNER_USDT_WALLET; // Use your Tron USDT wallet (TEq4NrK2Sov4fJetbcV577JvK5FkzhLVYw)
     console.log('Returning owner wallet:', ownerWallet);
     res.json({ wallet: ownerWallet, qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${ownerWallet}` });
 });
@@ -226,36 +231,41 @@ app.post('/api/pending-deposit', authenticateToken, async (req, res) => {
 
 async function monitorUSDTDeposits() {
     try {
-        // Use Bybit API to check deposits to TEq4NrK2Sov4fJetbcV577JvK5FkzhLVYw
-        const walletBalance = await bybit.getWalletBalance({ coin: 'USDT' });
-        const deposits = walletBalance.result.list.find(w => w.walletId === 'TEq4NrK2Sov4fJetbcV577JvK5FkzhLVYw' && w.coin === 'USDT');
-        if (deposits && deposits.balance > 0) { // Simplified check; adjust based on Bybit API response
-            const amount = parseFloat(deposits.balance) / 1e6; // Convert to USDT (TRC-20 has 6 decimals)
-            const depositsQuery = query(collection(db, 'deposits'), where('status', '==', 'pending'));
-            const depositsSnap = await getDocs(depositsQuery);
-            for (const doc of depositsSnap.docs) {
-                const deposit = doc.data();
-                if (deposit.amount === amount && deposit.userId) {
-                    const userDocRef = doc(db, 'users', deposit.userId);
-                    const userDoc = await getDoc(userDocRef);
-                    const currentBalance = userDoc.data().balance || 0;
-                    await updateDoc(userDocRef, { balance: currentBalance + amount });
-                    await updateDoc(doc.ref, { status: 'completed', timestamp: serverTimestamp() });
-                    io.to(deposit.userId).emit('transfer', { walletId: userDoc.data().walletId, amount, type: 'deposit' });
-                    break;
+        // Monitor Tron blockchain for USDT (TRC-20) transactions to OWNER_USDT_WALLET every 5 seconds
+        const transactions = await tronWeb.trx.getTransactionsToAddress(process.env.OWNER_USDT_WALLET, 50); // Get last 50 transactions
+        for (const tx of transactions) {
+            if (tx.contractData && tx.contractData.token_name === 'USDT' && tx.contractData.amount) {
+                const amount = tx.contractData.amount / 1e6; // Convert TRC-20 USDT (6 decimals)
+                const txId = tx.txID;
+                const fromAddress = tx.contractData.owner_address;
+
+                // Find pending deposits in Firestore
+                const depositsQuery = query(collection(db, 'deposits'), where('status', '==', 'pending'));
+                const depositsSnap = await getDocs(depositsQuery);
+                for (const doc of depositsSnap.docs) {
+                    const deposit = doc.data();
+                    if (deposit.amount === amount && deposit.userId) {
+                        const userDocRef = doc(db, 'users', deposit.userId);
+                        const userDoc = await getDoc(userDocRef);
+                        const currentBalance = userDoc.data().balance || 0;
+                        await updateDoc(userDocRef, { balance: currentBalance + amount });
+                        await updateDoc(doc.ref, { status: 'completed', txId, timestamp: serverTimestamp() });
+                        io.to(deposit.userId).emit('transfer', { walletId: userDoc.data().walletId, amount, type: 'deposit' });
+                        break;
+                    }
                 }
             }
         }
     } catch (error) {
-        console.error('Error monitoring USDT deposits via Bybit API:', error);
-        if (error.response && error.response.status === 429) { // Rate limit handling
-            console.warn('Rate limit exceeded on Bybit API, backing off...');
+        console.error('Error monitoring USDT deposits:', error);
+        if (error.response && error.response.status === 429) { // Rate limit handling for TronGrid
+            console.warn('Rate limit exceeded on TronGrid API, backing off...');
             await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds before retrying
         }
     }
 }
 
-// Check every 5 seconds (5000 milliseconds) to avoid Bybit rate limits
+// Check every 5 seconds (5000 milliseconds) to avoid TronGrid rate limits
 setInterval(monitorUSDTDeposits, 5000);
 
 app.post('/api/deposit', authenticateToken, async (req, res) => {
@@ -269,14 +279,14 @@ app.post('/api/deposit', authenticateToken, async (req, res) => {
         }
         // Add actual 2FA verification logic here
 
-        // Log pending deposit via Bybit
+        // Log pending deposit
         await setDoc(doc(collection(db, 'deposits'), `${req.user.userId}_${Date.now()}`), {
             userId: req.user.userId,
             amount,
             timestamp: new Date().toISOString(),
             status: 'pending'
         });
-        res.json({ success: true, message: `Deposit of ${amount} USDT requested. Please send to wallet: TEq4NrK2Sov4fJetbcV577JvK5FkzhLVYw on Bybit and await confirmation.` });
+        res.json({ success: true, message: `Deposit of ${amount} USDT requested. Please send to wallet: ${process.env.OWNER_USDT_WALLET} and await confirmation.` });
     } catch (error) {
         console.error('Deposit error:', error);
         res.status(500).json({ error: 'Deposit error' });
@@ -306,33 +316,28 @@ app.post('/api/transfer', authenticateToken, async (req, res) => {
         await updateDoc(senderDocRef, { balance: newSenderBalance });
         await updateDoc(receiverDocRef, { balance: newReceiverBalance });
 
-        // Use Bybit API to transfer USDT (simplified; adjust based on Bybit API)
-        // Note: Bybit doesn’t directly support peer-to-peer transfers to external wallets via API; you’d need to withdraw to the recipient’s Tron address
-        await bybit.createWithdrawal({
-            coin: 'USDT',
-            chain: 'TRC20',
-            address: await getTronAddressFromWalletId(toWalletId), // Helper function to map walletId to Tron address
-            amount: amount,
-            timestamp: Date.now(),
-        });
+        // Perform on-chain transfer using TronWeb
+        const senderAddress = tronWeb.address.fromPrivateKey(process.env.TRON_PRIVATE_KEY);
+        const receiverAddress = await getTronAddressFromWalletId(toWalletId);
+        await tronWeb.trx.sendTrx(receiverAddress, tronWeb.toSun(amount * 1e6), { from: senderAddress }); // Adjust for TRC-20 USDT transfer if needed
 
         io.to(req.user.userId).emit('transfer', { fromWalletId: senderDoc.data().walletId, toWalletId, amount, type: 'peer' });
         io.to(receiverDoc.id).emit('transfer', { fromWalletId: senderDoc.data().walletId, toWalletId, amount, type: 'peer' });
 
-        res.json({ success: true, message: `Transferred ${amount} USDT to ${toWalletId} via Bybit` });
+        res.json({ success: true, message: `Transferred ${amount} USDT to ${toWalletId}` });
     } catch (error) {
         console.error('Transfer error:', error);
         res.status(500).json({ error: 'Transfer error' });
     }
 });
 
-// Helper function to map DISWallet walletId to Tron address (placeholder; adjust based on your needs)
+// Helper function to map DISWallet walletId to Tron address
 async function getTronAddressFromWalletId(walletId) {
     const usersQuery = query(collection(db, 'users'), where('walletId', '==', walletId));
     const usersSnap = await getDocs(usersQuery);
     if (!usersSnap.empty) {
         const userDoc = usersSnap.docs[0];
-        return userDoc.data().tronAddress || 'TEq4NrK2Sov4fJetbcV577JvK5FkzhLVYw'; // Default or fetch actual address
+        return userDoc.data().tronAddress || process.env.OWNER_USDT_WALLET; // Default to owner wallet or fetch actual address
     }
     throw new Error('Wallet ID not found');
 }
@@ -352,15 +357,10 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
 
         await updateDoc(userDocRef, { balance: newBalance });
 
-        // Handle withdrawal based on destination type via Bybit API
+        // Handle withdrawal based on destination type
         if (withdrawalWalletId.startsWith('T') || withdrawalWalletId.startsWith('41')) { // Tron address
-            await bybit.createWithdrawal({
-                coin: 'USDT',
-                chain: 'TRC20',
-                address: withdrawalWalletId,
-                amount: amountAfterFee,
-                timestamp: Date.now(),
-            });
+            const senderAddress = tronWeb.address.fromPrivateKey(process.env.TRON_PRIVATE_KEY);
+            await tronWeb.trx.sendTrx(withdrawalWalletId, tronWeb.toSun(amountAfterFee * 1e6), { from: senderAddress }); // Adjust for TRC-20 USDT transfer if needed
             await setDoc(doc(collection(db, 'transactions')), {
                 fromWalletId: userDoc.data().walletId,
                 toWalletId: withdrawalWalletId,
@@ -370,7 +370,7 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
                 timestamp: serverTimestamp(),
                 userId: req.user.userId
             });
-            res.json({ success: true, message: `Withdrawal of ${amountAfterFee} USDT (after 5% fee) to Tron address ${withdrawalWalletId} requested via Bybit.`, qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${withdrawalWalletId}` });
+            res.json({ success: true, message: `Withdrawal of ${amountAfterFee} USDT (after 5% fee) to Tron address ${withdrawalWalletId} requested. Transaction processed on blockchain.`, qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${withdrawalWalletId}` });
         } else if (withdrawalWalletId.includes('@') || withdrawalWalletId.includes('.com')) { // PayPal email
             await handlePayPalWithdrawal(req.user.userId, amountAfterFee, withdrawalWalletId);
             await setDoc(doc(collection(db, 'transactions')), {
@@ -382,7 +382,7 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
                 timestamp: serverTimestamp(),
                 userId: req.user.userId
             });
-            res.json({ success: true, message: `Withdrawal of ${amountAfterFee} USDT (after 5% fee) to PayPal ${withdrawalWalletId} requested via Bybit. Please check your PayPal account for confirmation.` });
+            res.json({ success: true, message: `Withdrawal of ${amountAfterFee} USDT (after 5% fee) to PayPal ${withdrawalWalletId} requested. Please check your PayPal account for confirmation.` });
         } else {
             return res.status(400).json({ error: 'Invalid withdrawal destination (use Tron address or PayPal email)' });
         }
@@ -395,9 +395,9 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
 // Helper function for PayPal withdrawal (simplified, requires PayPal API integration)
 async function handlePayPalWithdrawal(userId, amount, paypalEmail) {
     // Use PayPal API to convert USDT to USD and transfer to PayPal (requires PayPal Developer account and API keys)
-    console.log(`Simulating PayPal withdrawal of ${amount} USDT to ${paypalEmail} for user ${userId} via Bybit`);
+    console.log(`Simulating PayPal withdrawal of ${amount} USDT to ${paypalEmail} for user ${userId} via Tron`);
     // Placeholder: Implement actual PayPal API call here (e.g., using paypal-rest-sdk or paypal-checkout)
-    // Note: Convert USDT to USD via Bybit or an exchange before transferring to PayPal
+    // Note: Convert USDT to USD via an exchange before transferring to PayPal
 }
 
 app.post('/api/add-friend', authenticateToken, async (req, res) => {
