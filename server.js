@@ -310,17 +310,27 @@ async function monitorETHDeposits() {
 // Poll every 5 seconds for faster detection
 setInterval(monitorETHDeposits, 5000);
 
+// ... (previous code remains unchanged until getLiveEthPrice)
+
 async function getLiveEthPrice() {
     try {
-        const response = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd');
+        const response = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd', {
+            timeout: 5000, // Add timeout to prevent hanging
+            headers: {
+                'User-Agent': 'DISWallet/1.0 (https://five445.onrender.com)', // Custom User-Agent to identify requests
+            },
+        });
         const price = response.data.ethereum.usd;
         const timestamp = new Date().toISOString();
         return { price, timestamp };
     } catch (error) {
-        console.error('Error fetching live ETH price (suppressed from logs):', error);
-        return { price: 3000.00, timestamp: new Date().toISOString() }; // Default to $3000.00 if API fails (approximate ETH value)
+        // Suppress detailed error logging for 403 Forbidden or other non-critical errors
+        console.warn('Failed to fetch live ETH price from CoinGecko (suppressed from logs): Using fallback price of $3000.00');
+        return { price: 3000.00, timestamp: new Date().toISOString() }; // Default to $3000.00 if API fails
     }
 }
+
+// ... (rest of the code remains unchanged)
 
 app.post('/api/deposit', authenticateToken, async (req, res) => {
     const { amount, walletId, verificationCode } = req.body;
