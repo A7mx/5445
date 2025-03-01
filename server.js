@@ -7,7 +7,7 @@ const bodyParser = require('body-parser');
 const path = require('path');
 const socketIo = require('socket.io');
 const http = require('http');
-const crypto = require('crypto');
+const TronWeb = require('tronweb'); // Added for blockchain monitoring
 
 const requiredEnv = ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI', 'FIREBASE_API_KEY', 'OWNER_USDT_WALLET'];
 requiredEnv.forEach(key => {
@@ -46,11 +46,11 @@ app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 function generateToken() {
-    return crypto.randomBytes(16).toString('hex');
+    return require('crypto').randomBytes(16).toString('hex');
 }
 
 function generateWalletId() {
-    return `WAL-${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
+    return `WAL-${require('crypto').randomBytes(6).toString('hex').toUpperCase()}`;
 }
 
 async function authenticateToken(req, res, next) {
@@ -199,15 +199,36 @@ app.get('/api/owner-wallet', (req, res) => {
     res.json({ wallet: ownerWallet, qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${ownerWallet}` });
 });
 
+app.post('/api/pending-deposit', authenticateToken, async (req, res) => {
+  const { userId, amount, timestamp, status } = req.body;
+  try {
+    await setDoc(doc(collection(db, 'deposits'), `${userId}_${Date.now()}`), {
+      userId,
+      amount,
+      timestamp,
+      status
+    });
+    res.json({ success: true, message: 'Deposit request logged' });
+  } catch (error) {
+    console.error('Pending deposit error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 app.post('/api/deposit', authenticateToken, async (req, res) => {
-    const { amount, walletId } = req.body;
-    if (!amount || amount <= 0) return res.status(400).json({ error: 'Invalid deposit amount' });
+    const { amount, walletId, verificationCode } = req.body;
+    if (!amount || amount <= 0 || !walletId || amount < 6) return res.status(400).json({ error: 'Invalid deposit amount (minimum 6 USDT)' });
     try {
-        const userDocRef = doc(db, 'users', req.user.userId);
-        const userDoc = await getDoc(userDocRef);
+        // Verify 2FA (simplified, you can integrate with Firebase Auth or TOTP)
+        const userDoc = await getDoc(doc(db, 'users', req.user.userId));
+        if (!userDoc.data().twoFactorSecret || !verificationCode) {
+            return res.status(401).json({ error: '2FA verification required' });
+        }
+        // Add actual 2FA verification logic here (e.g., compare with Firebase Auth or TOTP)
+
         const currentBalance = userDoc.data().balance;
         const newBalance = currentBalance + amount;
-        await updateDoc(userDocRef, { balance: newBalance });
+        await updateDoc(doc(db, 'users', req.user.userId), { balance: newBalance });
         res.json({ success: true, message: `Deposit of ${amount} USDT requested. Please send to owner wallet: ${process.env.OWNER_USDT_WALLET} and await confirmation.` });
     } catch (error) {
         console.error('Deposit error:', error);
@@ -250,7 +271,7 @@ app.post('/api/transfer', authenticateToken, async (req, res) => {
 
 app.post('/api/withdraw', authenticateToken, async (req, res) => {
     const { amount, withdrawalWalletId } = req.body;
-    if (!amount || amount <= 0 || !withdrawalWalletId) return res.status(400).json({ error: 'Invalid withdrawal request' });
+    if (!amount || amount <= 0 || !withdrawalWalletId || amount < 6) return res.status(400).json({ error: 'Invalid withdrawal request (minimum 6 USDT)' });
     try {
         const userDocRef = doc(db, 'users', req.user.userId);
         const userDoc = await getDoc(userDocRef);
@@ -268,10 +289,11 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
             amount: amountAfterFee,
             fee,
             type: 'withdrawal',
-            timestamp: serverTimestamp()
+            timestamp: serverTimestamp(),
+            userId: req.user.userId
         });
 
-        res.json({ success: true, message: `Withdrawal of ${amountAfterFee} USDT (after 5% fee) to ${withdrawalWalletId} requested. Processing soon.` });
+        res.json({ success: true, message: `Withdrawal of ${amountAfterFee} USDT (after 5% fee) to ${withdrawalWalletId} requested. Please check your wallet for confirmation.`, qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${withdrawalWalletId}` });
     } catch (error) {
         console.error('Withdrawal error:', error);
         res.status(500).json({ error: 'Withdrawal error' });
@@ -341,17 +363,44 @@ app.post('/api/transactions', authenticateToken, async (req, res) => {
     }
 });
 
-io.on('connection', socket => {
-    console.log('Socket connected:', socket.id);
-    socket.on('join', userId => {
-        console.log('User joined socket room:', userId);
-        socket.join(userId);
-    });
-    socket.on('chat', ({ toId, message }) => {
-        console.log('Chat message from:', socket.id, 'to:', toId, 'message:', message);
-        io.to(toId).emit('chat', { from: socket.id, message });
-    });
+// Monitor Tron blockchain for USDT deposits to OWNER_USDT_WALLET
+const tronWeb = new TronWeb({
+    fullHost: 'https://api.trongrid.io', // TronGrid public node
+    privateKey: 'YOUR_PRIVATE_KEY' // Replace with your private key for TJfMChcqXQoWSpim2XzBjwH1s84BbwzZzZ (store securely)
 });
+
+async function monitorDeposits() {
+    try {
+        const transactions = await tronWeb.trx.getTransactionsToAddress(process.env.OWNER_USDT_WALLET, 50); // Get last 50 transactions
+        for (const tx of transactions) {
+            if (tx.contractData && tx.contractData.token_name === 'USDT' && tx.contractData.amount) {
+                const amount = tx.contractData.amount / 1e6; // Convert TRC-20 USDT (6 decimals)
+                const txId = tx.txID;
+                const fromAddress = tx.contractData.owner_address;
+
+                // Find pending deposits in Firestore
+                const depositsQuery = query(collection(db, 'deposits'), where('status', '==', 'pending'));
+                const depositsSnap = await getDocs(depositsQuery);
+                for (const doc of depositsSnap.docs) {
+                    const deposit = doc.data();
+                    if (deposit.amount === amount && deposit.userId) {
+                        const userDocRef = doc(db, 'users', deposit.userId);
+                        const userDoc = await getDoc(userDocRef);
+                        const currentBalance = userDoc.data().balance;
+                        await updateDoc(userDocRef, { balance: currentBalance + amount });
+                        await updateDoc(doc.ref, { status: 'completed', txId, timestamp: serverTimestamp() });
+                        io.to(deposit.userId).emit('transfer', { walletId: userDoc.data().walletId, amount, type: 'deposit' });
+                        break;
+                    }
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error monitoring deposits:', error);
+    }
+}
+
+setInterval(monitorDeposits, 60000); // Check every minute
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
