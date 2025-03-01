@@ -2,9 +2,11 @@ require('dotenv').config();
 const express = require('express');
 const DiscordOAuth2 = require('discord-oauth2');
 const { initializeApp } = require('firebase/app');
-const { getFirestore, doc, getDoc, setDoc, serverTimestamp } = require('firebase/firestore');
+const { getFirestore, doc, getDoc, setDoc, updateDoc, arrayUnion, serverTimestamp, collection, query, where, getDocs } = require('firebase/firestore');
 const bodyParser = require('body-parser');
 const path = require('path');
+const socketIo = require('socket.io');
+const http = require('http');
 
 // Validate environment variables
 const requiredEnv = ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI', 'FIREBASE_API_KEY'];
@@ -26,16 +28,22 @@ const firebaseConfig = {
 const appFirebase = initializeApp(firebaseConfig);
 const db = getFirestore(appFirebase);
 
-// Initialize Discord OAuth
-const oauth = new DiscordOAuth2();
-
-// Initialize Express
+// Initialize Express and Socket.io
 const app = express();
+const server = http.createServer(app);
+const io = socketIo(server);
+
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+const oauth = new DiscordOAuth2();
+
 function generateToken() {
     return require('crypto').randomBytes(16).toString('hex');
+}
+
+function generateWalletId() {
+    return `WAL-${require('crypto').randomBytes(6).toString('hex').toUpperCase()}`;
 }
 
 async function authenticateToken(req, res, next) {
@@ -60,9 +68,7 @@ async function authenticateToken(req, res, next) {
 }
 
 // Routes
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 app.get('/auth/discord', (req, res) => {
     const url = oauth.generateAuthUrl({
@@ -96,7 +102,10 @@ app.get('/auth/discord/callback', async (req, res) => {
             await setDoc(userDocRef, {
                 username: user.username,
                 avatar: `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png`,
-                balance: 0
+                walletId: generateWalletId(),
+                balance: 0,
+                friends: [],
+                pendingFriends: []
             });
             console.log('Created user:', user.username);
         }
@@ -118,24 +127,61 @@ app.get('/auth/discord/callback', async (req, res) => {
 app.post('/api/user', authenticateToken, async (req, res) => {
     try {
         const userDoc = await getDoc(doc(db, 'users', req.user.userId));
-        if (!userDoc.exists()) {
-            console.log('User not found:', req.user.userId);
-            return res.status(404).json({ error: 'User not found' });
-        }
+        if (!userDoc.exists()) return res.status(404).json({ error: 'User not found' });
         const data = userDoc.data();
-        const response = {
+        const friendsData = await Promise.all((data.friends || []).map(async friendId => {
+            const friendDoc = await getDoc(doc(db, 'users', friendId));
+            return friendDoc.exists() ? { id: friendId, username: friendDoc.data().username, avatar: friendDoc.data().avatar, walletId: friendDoc.data().walletId } : null;
+        }));
+        const pendingFriendsData = await Promise.all((data.pendingFriends || []).map(async friendId => {
+            const friendDoc = await getDoc(doc(db, 'users', friendId));
+            return friendDoc.exists() ? { id: friendId, username: friendDoc.data().username, avatar: friendDoc.data().avatar, walletId: friendDoc.data().walletId } : null;
+        }));
+        res.json({
             userId: userDoc.id,
             username: data.username,
             avatar: data.avatar,
-            balance: data.balance
-        };
-        console.log('Sending user data:', response);
-        res.json(response);
+            walletId: data.walletId,
+            balance: data.balance,
+            friends: friendsData.filter(f => f),
+            pendingFriends: pendingFriendsData.filter(f => f)
+        });
     } catch (error) {
         console.error('API user error:', error);
         res.status(500).json({ error: 'Server error' });
     }
 });
 
+app.post('/api/wallet-id', authenticateToken, async (req, res) => {
+    try {
+        const userDoc = await getDoc(doc(db, 'users', req.user.userId));
+        if (!userDoc.exists()) return res.status(404).json({ error: 'User not found' });
+        res.json({ qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${userDoc.data().walletId}` });
+    } catch (error) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Placeholder endpoints (to be fully implemented)
+app.post('/api/deposit', authenticateToken, (req, res) => res.json({ success: true, message: 'Deposit initiated (placeholder)' }));
+app.post('/api/transfer', authenticateToken, (req, res) => res.json({ success: true, message: 'Transfer initiated (placeholder)' }));
+app.post('/api/withdraw', authenticateToken, (req, res) => res.json({ success: true, message: 'Withdrawal initiated (placeholder)', qrCode: 'https://via.placeholder.com/150' }));
+app.post('/api/add-friend', authenticateToken, (req, res) => res.json({ success: true, message: 'Friend request sent (placeholder)' }));
+app.post('/api/accept-friend', authenticateToken, (req, res) => res.json({ success: true, message: 'Friend accepted (placeholder)' }));
+app.post('/api/ignore-friend', authenticateToken, (req, res) => res.json({ success: true, message: 'Friend ignored (placeholder)' }));
+app.get('/api/chat/:friendId', authenticateToken, (req, res) => res.json({ success: true, messages: [] }));
+app.post('/api/transactions', authenticateToken, (req, res) => res.json({ success: true, transactions: [] }));
+
+// Socket.io setup
+io.on('connection', socket => {
+    console.log('Socket connected:', socket.id);
+    socket.on('join', userId => {
+        socket.join(userId);
+    });
+    socket.on('chat', ({ toId, message }) => {
+        io.to(toId).emit('chat', { from: socket.auth.userId, message });
+    });
+});
+
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+server.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
