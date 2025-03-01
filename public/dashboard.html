@@ -32,9 +32,9 @@
     <section class="balance-section">
       <div class="balance-card">
         <h2>Total Balance</h2>
-        <div id="balance-amount" class="balance-value">0.00 USDT</div>
-        <p class="last-transaction">Last transaction on Tron Mainnet: <span id="last-transaction">No transactions yet</span></p>
-        <p id="usdt-price">USDT Price: Loading... (Updated: Loading...)</p>
+        <div id="balance-amount" class="balance-value">0.00 DIS</div>
+        <p class="last-transaction">Last transaction on Ethereum Mainnet: <span id="last-transaction">No transactions yet</span></p>
+        <p id="dis-price">DIS Price: Loading... (Updated: Loading...)</p>
       </div>
       <div class="coin-list">
         <div class="coin-filter">
@@ -42,67 +42,67 @@
           <input type="text" id="coin-search" placeholder="Search a Coin" oninput="filterCoins('search', this.value)">
         </div>
         <ul id="coin-list">
-          <li class="coin-item" data-coin="usdt">
-            <img src="/images/usdt.png" alt="USDT" class="coin-icon">
-            <span class="coin-name">USDT</span>
-            <span id="usdt-balance" class="coin-balance">0.000000 USDT</span>
-            <span class="coin-value" id="usdt-value">0.00 USD</span>
+          <li class="coin-item" data-coin="dis">
+            <img src="/images/eth.png" alt="DIS" class="coin-icon">
+            <span class="coin-name">DIS</span>
+            <span id="dis-balance" class="coin-balance">0.000000 DIS</span>
+            <span class="coin-value" id="dis-value">0.00 USD</span>
             <span class="coin-change">+0.00 (0.00%)</span>
-            <button class="buy-btn" onclick="buyCoin('usdt')">Buy</button>
+            <button class="buy-btn" onclick="buyCoin('dis')">Buy</button>
           </li>
         </ul>
       </div>
     </section>
     <section class="content-sections">
       <section id="deposit" class="content-card active">
-        <h2>Deposit Funds on Tron Mainnet</h2>
+        <h2>Deposit Funds on Ethereum Mainnet</h2>
         <p>Your Wallet ID: <span id="wallet-id">Loading...</span></p>
-        <img id="qr-code" src="https://via.placeholder.com/150" alt="QR Code for Deposit on Tron Mainnet">
-        <input id="deposit-amount" type="number" placeholder="Amount to Deposit (USDT, min 6 USDT)" step="0.01">
+        <img id="qr-code" src="https://via.placeholder.com/150" alt="QR Code for Deposit on Ethereum Mainnet">
+        <input id="deposit-amount" type="number" placeholder="Amount to Deposit (DIS, min 0.01 DIS)" step="0.0001">
         <button onclick="depositFunds()">Deposit Now</button>
-        <p id="deposit-tip" class="tip">Send USDT (TRC-20) to the owner wallet address provided after clicking "Deposit Now" on Tron Mainnet. Minimum deposit is 6 USDT. Current USDT Price: Loading... (Updated: Loading...)</p>
+        <p id="deposit-tip" class="tip">Send DIS (ETH) to the owner wallet address provided after clicking "Deposit Now" on Ethereum Mainnet. Minimum deposit is 0.01 DIS. Current DIS Price: Loading... (Updated: Loading...)</p>
       </section>
       <section id="exchange" class="content-card">
-        <h2>Exchange Funds on Tron Mainnet</h2>
-        <p>Exchange USDT for other cryptocurrencies or fiat coming soon on Tron Mainnet!</p>
+        <h2>Exchange Funds on Ethereum Mainnet</h2>
+        <p>Exchange DIS for other cryptocurrencies or fiat coming soon on Ethereum Mainnet!</p>
       </section>
       <section id="transfer" class="content-card">
-        <h2>Transfer Funds on Tron Mainnet</h2>
+        <h2>Transfer Funds on Ethereum Mainnet</h2>
         <input id="transfer-to-wallet" placeholder="Recipient Wallet ID">
-        <input id="transfer-amount" type="number" placeholder="Amount to Transfer (USDT)" step="0.01">
+        <input id="transfer-amount" type="number" placeholder="Amount to Transfer (DIS)" step="0.0001">
         <button onclick="transferFunds()">Transfer Now</button>
-        <p id="transfer-tip" class="tip">Transfer USDT to another user instantly using their wallet ID on Tron Mainnet. Current USDT Price: Loading... (Updated: Loading...)</p>
+        <p id="transfer-tip" class="tip">Transfer DIS to another user instantly using their wallet ID on Ethereum Mainnet. Current DIS Price: Loading... (Updated: Loading...)</p>
       </section>
       <section id="withdraw" class="content-card">
-        <h2>Withdraw Funds on Tron Mainnet</h2>
-        <input id="withdraw-amount" type="number" placeholder="Amount to Withdraw (USDT, min 6 USDT)" step="0.01">
-        <input id="withdrawal-wallet" placeholder="Tron Address or PayPal Email (e.g., TEq... or user@paypal.com)">
-        <p>4% Withdrawal Fee Will Apply on Tron Mainnet. Withdrawal processed manually—check status in History.</p>
+        <h2>Withdraw Funds on Ethereum Mainnet</h2>
+        <input id="withdraw-amount" type="number" placeholder="Amount to Withdraw (DIS, min 0.01 DIS)" step="0.0001">
+        <input id="withdrawal-wallet" placeholder="Ethereum Address or PayPal Email (e.g., 0x... or user@paypal.com)">
+        <p>4% Withdrawal Fee Will Apply on Ethereum Mainnet. Withdrawal processed manually—check status in History.</p>
         <button onclick="withdrawFunds()">Withdraw Now</button>
-        <img id="withdraw-qr" src="https://via.placeholder.com/150" alt="QR Code for Withdrawal on Tron Mainnet">
-        <p id="withdraw-tip" class="tip">Withdraw USDT to your Tron wallet or PayPal account on Tron Mainnet. Minimum withdrawal is 6 USDT. No external login required. Current USDT Price: Loading... (Updated: Loading...)</p>
+        <img id="withdraw-qr" src="https://via.placeholder.com/150" alt="QR Code for Withdrawal on Ethereum Mainnet">
+        <p id="withdraw-tip" class="tip">Withdraw DIS to your Ethereum wallet or PayPal account on Ethereum Mainnet. Minimum withdrawal is 0.01 DIS. No external login required. Current DIS Price: Loading... (Updated: Loading...)</p>
       </section>
       <section id="friends" class="content-card">
-        <h2>Friends on Tron Mainnet</h2>
+        <h2>Friends on Ethereum Mainnet</h2>
         <input id="friend-id" placeholder="Friend's Discord ID">
         <button onclick="addFriend()">Send Friend Request</button>
         <div id="pending-list"></div>
         <div id="friends-list"></div>
       </section>
       <section id="transactions" class="content-card">
-        <h2>Transaction History on Tron Mainnet</h2>
+        <h2>Transaction History on Ethereum Mainnet</h2>
         <button onclick="searchTransactions()">View Transactions</button>
         <div id="trans-list"></div>
       </section>
     </section>
     <aside class="sidebar">
       <div class="sidebar-section tips">
-        <h3>Tips on Tron Mainnet</h3>
-        <p>Keep your wallet secure by using strong passwords and enabling two-factor authentication on Tron Mainnet.</p>
+        <h3>Tips on Ethereum Mainnet</h3>
+        <p>Keep your wallet secure by using strong passwords and enabling two-factor authentication on Ethereum Mainnet.</p>
       </div>
       <div class="sidebar-section news">
-        <h3>News on Tron Mainnet</h3>
-        <p>Latest crypto updates on Tron Mainnet: USDT market stable, Tron reaches new highs!</p>
+        <h3>News on Ethereum Mainnet</h3>
+        <p>Latest crypto updates on Ethereum Mainnet: DIS (ETH) market stable, Ethereum reaches new highs!</p>
       </div>
     </aside>
     <aside class="chat-panel hidden">
@@ -113,17 +113,17 @@
       <div id="chat-box">
         <div id="no-messages">
           <span style="font-size: 24px;">📩</span>
-          <p>No messages on Tron Mainnet</p>
-          <p>Messages from your friend will be shown here on Tron Mainnet</p>
+          <p>No messages on Ethereum Mainnet</p>
+          <p>Messages from your friend will be shown here on Ethereum Mainnet</p>
         </div>
       </div>
-      <input id="chat-input" placeholder="Type a message on Tron Mainnet">
-      <button id="chat-send" onclick="sendChat()">Send on Tron Mainnet</button>
+      <input id="chat-input" placeholder="Type a message on Ethereum Mainnet">
+      <button id="chat-send" onclick="sendChat()">Send on Ethereum Mainnet</button>
     </aside>
   </main>
   <footer>
-    <p>© 2025 DISWallet. All rights reserved on Tron Mainnet. | <a href="/terms">Terms</a> | <a href="/privacy">Privacy</a></p>
-    <img src="/images/trust-badges.png" alt="Trust Badges on Tron Mainnet" class="trust-badges">
+    <p>© 2025 DISWallet. All rights reserved on Ethereum Mainnet. | <a href="/terms">Terms</a> | <a href="/privacy">Privacy</a></p>
+    <img src="/images/trust-badges.png" alt="Trust Badges on Ethereum Mainnet" class="trust-badges">
   </footer>
   <script src="/socket.io/socket.io.js"></script>
   <script src="/script.js"></script>
