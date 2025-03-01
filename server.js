@@ -7,7 +7,7 @@ const bodyParser = require('body-parser');
 const path = require('path');
 const socketIo = require('socket.io');
 const http = require('http');
-const { RESTV5 } = require('bybit-api'); // Updated import for Bybit V5 API
+const { REST } = require('bybit-api'); // Correct import for Bybit V5 API
 
 const requiredEnv = ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI', 'FIREBASE_API_KEY', 'BYBIT_API_KEY', 'BYBIT_API_SECRET'];
 requiredEnv.forEach(key => {
@@ -43,7 +43,7 @@ const io = socketIo(server);
 const oauth = new DiscordOAuth2();
 
 // Initialize Bybit API with your provided credentials
-const bybit = new RESTV5({
+const bybit = new REST({
     key: process.env.BYBIT_API_KEY,  // pPxTQty9kwgZCcoeMR
     secret: process.env.BYBIT_API_SECRET,  // gc93wnh5zpayfGcwmwHPXhpYcQ4sWW3PU9gT
     testnet: false, // Use mainnet for production
@@ -255,8 +255,8 @@ async function monitorUSDTDeposits() {
     }
 }
 
-// Check every 1 second (1000 milliseconds)
-setInterval(monitorUSDTDeposits, 1000);
+// Check every 5 seconds (5000 milliseconds) to avoid Bybit rate limits
+setInterval(monitorUSDTDeposits, 5000);
 
 app.post('/api/deposit', authenticateToken, async (req, res) => {
     const { amount, walletId, verificationCode } = req.body;
