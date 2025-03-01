@@ -1,4 +1,3 @@
-// Get the token from the URL after OAuth redirect
 const token = new URLSearchParams(window.location.search).get('token');
 if (!token) {
   console.error('No token found, redirecting to login');
@@ -6,7 +5,6 @@ if (!token) {
   window.location.href = '/';
 }
 
-// Socket.io connection (assuming server supports it, we'll add later if needed)
 const socket = io({ auth: { token } });
 
 let userData = {};
@@ -48,17 +46,23 @@ async function refreshUserData() {
     updateQRCode();
   } catch (error) {
     showError('Error fetching user data: ' + error.message);
+    document.getElementById('username').textContent = 'Error';
+    document.getElementById('avatar').src = 'https://via.placeholder.com/40';
   }
 }
 
 function updateUI() {
-  document.getElementById('avatar').src = userData.avatar || 'https://via.placeholder.com/40';
-  document.getElementById('avatar').onerror = () => {
-    document.getElementById('avatar').src = 'https://via.placeholder.com/40';
+  const avatarEl = document.getElementById('avatar');
+  console.log('Setting avatar URL:', userData.avatar);
+  avatarEl.src = userData.avatar || 'https://via.placeholder.com/40';
+  avatarEl.onload = () => console.log('Avatar loaded successfully');
+  avatarEl.onerror = () => {
+    console.warn('Avatar failed to load, using fallback');
+    avatarEl.src = 'https://via.placeholder.com/40';
   };
   document.getElementById('username').textContent = userData.username || 'Unknown';
   document.getElementById('discord-id').textContent = `ID: ${userData.userId}`;
-  document.getElementById('balance-amount').textContent = `${userData.balance || 0} DIS`;
+  document.getElementById('balance-amount').textContent = `${userData.balance || 0} USDT`;
   document.getElementById('wallet-id').textContent = userData.walletId || 'N/A';
 }
 
@@ -96,13 +100,12 @@ async function updateQRCode() {
   try {
     const data = await fetchWithToken('/api/wallet-id');
     document.getElementById('qr-code').src = data.qrCode || 'https://via.placeholder.com/150';
-    document.getElementById('withdraw-qr').src = ''; // Clear until withdrawal
+    document.getElementById('withdraw-qr').src = '';
   } catch (error) {
     showError('Error fetching QR code: ' + error.message);
   }
 }
 
-// Initial load
 refreshUserData();
 
 function toggleUserInfo() {
@@ -124,9 +127,7 @@ async function depositFunds() {
     return;
   }
   try {
-    const data = await fetchWithToken('/api/deposit', {
-      body: { amount, walletId: userData.walletId }
-    });
+    const data = await fetchWithToken('/api/deposit', { body: { amount, walletId: userData.walletId } });
     showSuccess(data.message);
     refreshUserData();
     document.getElementById('deposit-amount').value = '';
@@ -158,9 +159,7 @@ async function transferFunds() {
     return;
   }
   try {
-    const data = await fetchWithToken('/api/transfer', {
-      body: { toWalletId, amount }
-    });
+    const data = await fetchWithToken('/api/transfer', { body: { toWalletId, amount } });
     showSuccess(data.message);
     refreshUserData();
     document.getElementById('transfer-to-wallet').value = '';
@@ -182,9 +181,7 @@ async function withdrawFunds() {
     return;
   }
   try {
-    const data = await fetchWithToken('/api/withdraw', {
-      body: { amount, withdrawalWalletId: withdrawalWallet }
-    });
+    const data = await fetchWithToken('/api/withdraw', { body: { amount, withdrawalWalletId: withdrawalWallet } });
     showSuccess(data.message);
     refreshUserData();
     document.getElementById('withdraw-amount').value = '';
@@ -202,9 +199,7 @@ async function addFriend() {
     return;
   }
   try {
-    const data = await fetchWithToken('/api/add-friend', {
-      body: { friendId }
-    });
+    const data = await fetchWithToken('/api/add-friend', { body: { friendId } });
     showSuccess(data.message);
     refreshUserData();
     document.getElementById('friend-id').value = '';
@@ -215,9 +210,7 @@ async function addFriend() {
 
 async function acceptFriend(friendId) {
   try {
-    const data = await fetchWithToken('/api/accept-friend', {
-      body: { friendId }
-    });
+    const data = await fetchWithToken('/api/accept-friend', { body: { friendId } });
     showSuccess(data.message);
     refreshUserData();
   } catch (error) {
@@ -227,9 +220,7 @@ async function acceptFriend(friendId) {
 
 async function ignoreFriend(friendId) {
   try {
-    const data = await fetchWithToken('/api/ignore-friend', {
-      body: { friendId }
-    });
+    const data = await fetchWithToken('/api/ignore-friend', { body: { friendId } });
     showSuccess(data.message);
     refreshUserData();
   } catch (error) {
@@ -306,7 +297,7 @@ async function searchTransactions() {
     const data = await fetchWithToken('/api/transactions');
     const transList = document.getElementById('trans-list');
     transList.innerHTML = data.transactions
-      .map(t => `<p>From: ${t.fromWalletId}, To: ${t.toWalletId}, Amount: ${t.amount} DIS, Time: ${new Date(t.timestamp.seconds * 1000)}${t.type === 'owner_transfer' ? ' (To Owner)' : t.type === 'withdrawal' ? ` (Fee: ${t.fee} DIS)` : ''}</p>`)
+      .map(t => `<p>From: ${t.fromWalletId}, To: ${t.toWalletId}, Amount: ${t.amount} USDT, Time: ${new Date(t.timestamp.seconds * 1000)}${t.type === 'owner_transfer' ? ' (To Owner)' : t.type === 'withdrawal' ? ` (Fee: ${t.fee} USDT)` : ''}</p>`)
       .join('');
   } catch (error) {
     showError('Error fetching transactions: ' + error.message);
