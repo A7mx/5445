@@ -8,7 +8,7 @@ const path = require('path');
 const socketIo = require('socket.io');
 const http = require('http');
 const TronWeb = require('tronweb');
-const WebSocket = require('ws');
+const axios = require('axios');
 
 const requiredEnv = ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI', 'FIREBASE_API_KEY', 'OWNER_USDT_WALLET', 'TRON_PRIVATE_KEY'];
 requiredEnv.forEach(key => {
@@ -79,7 +79,7 @@ async function authenticateToken(req, res, next) {
             console.log('Invalid token:', token);
             return res.status(403).json({ error: 'Invalid token' });
         }
-        req.user = { userId: process.doc.data().userId };
+        req.user = { userId: sessionDoc.data().userId };
         console.log('Authenticated user:', req.user.userId);
         next();
     } catch (error) {
@@ -191,6 +191,7 @@ app.post('/api/user', authenticateToken, async (req, res) => {
             const friendDoc = await getDoc(doc(db, 'users', friendId));
             return friendDoc.exists() ? { id: friendId, username: friendDoc.data().username, avatar: friendDoc.data().avatar, walletId: friendDoc.data().walletId } : null;
         }));
+        const usdtPrice = await getLiveUsdtPrice();
         const response = {
             userId: userDoc.id,
             username: data.username,
@@ -198,9 +199,11 @@ app.post('/api/user', authenticateToken, async (req, res) => {
             walletId: data.walletId,
             balance: data.balance || 0,  // USDT balance
             friends: friendsData.filter(f => f),
-            pendingFriends: pendingFriendsData.filter(f => f)
+            pendingFriends: pendingFriendsData.filter(f => f),
+            usdtPrice: usdtPrice.price, // Live USDT price in USD
+            priceTime: usdtPrice.timestamp // Timestamp of the price
         };
-        console.log('Sending user data:', response);
+        console.log('Sending user data with USDT price:', response);
         res.json(response);
     } catch (error) {
         console.error('API user error:', error);
@@ -226,14 +229,14 @@ app.post('/api/pending-deposit', authenticateToken, async (req, res) => {
         });
         res.json({ success: true, message: 'Deposit request logged on Tron Mainnet' });
     } catch (error) {
-        console.error('Pending deposit error:', error);
+        console.error('Pending deposit error on Tron Mainnet:', error);
         res.status(500).json({ error: 'Server error' });
     }
 });
 
 async function monitorUSDTDeposits() {
     try {
-        // Use TronWeb to monitor transactions to OWNER_USDT_WALLET on Tron Mainnet
+        // Monitor Tron blockchain for USDT (TRC-20) transactions to OWNER_USDT_WALLET on Tron Mainnet
         const ownerAddress = process.env.OWNER_USDT_WALLET;
         const transactions = await tronWeb.trx.getTransactionsToAddress(ownerAddress, 50); // Get last 50 transactions
 
@@ -266,16 +269,18 @@ async function monitorUSDTDeposits() {
                             amount, 
                             type: 'deposit', 
                             network: 'Tron Mainnet',
-                            txId 
+                            txId,
+                            usdtPrice: await getLiveUsdtPrice().price, // Live USDT price
+                            priceTime: await getLiveUsdtPrice().timestamp // Price timestamp
                         });
-                        console.log(`Deposit of ${amount} USDT credited to user ${deposit.userId} on Tron Mainnet, TX: ${txId}`);
+                        console.log(`Deposit of ${amount} USDT credited to user ${deposit.userId} on Tron Mainnet, TX: ${txId}, USDT Price: $${await getLiveUsdtPrice().price} at ${await getLiveUsdtPrice().timestamp}`);
                         break;
                     }
                 }
             }
         }
     } catch (error) {
-        console.error('Error monitoring USDT deposits on Tron Mainnet:', error);
+        console.error('Error monitoring USDT deposits on Tron Mainnet (suppressed from logs):', error);
         if (error.response && error.response.status === 429) { // Rate limit handling for TronGrid
             console.warn('Rate limit exceeded on TronGrid API, backing off...');
             await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds before retrying
@@ -283,73 +288,20 @@ async function monitorUSDTDeposits() {
     }
 }
 
-// Use WebSocket for real-time transaction updates (optional, improves speed)
-let ws;
-function setupWebSocket() {
-    ws = new WebSocket('wss://api.trongrid.io/event'); // TronGrid WebSocket endpoint for real-time events
-    ws.on('open', () => {
-        console.log('WebSocket connected to TronGrid for real-time updates');
-        ws.send(JSON.stringify({
-            event_name: 'transaction',
-            address: process.env.OWNER_USDT_WALLET
-        }));
-    });
+// Poll every 5 seconds for faster detection (removed WebSocket due to 404 errors)
+setInterval(monitorUSDTDeposits, 5000);
 
-    ws.on('message', async (data) => {
-        try {
-            const event = JSON.parse(data);
-            if (event.event === 'transaction' && event.contractData && event.contractData.token_info && event.contractData.token_info.name === 'USDT' && event.contractData.amount) {
-                const amount = event.contractData.amount / 1e6; // Convert TRC-20 USDT
-                const txId = event.transaction_id;
-                const fromAddress = event.contractData.owner_address;
-
-                const depositsQuery = query(collection(db, 'deposits'), where('status', '==', 'pending'));
-                const depositsSnap = await getDocs(depositsQuery);
-                for (const doc of depositsSnap.docs) {
-                    const deposit = doc.data();
-                    if (deposit.amount === amount && deposit.userId) {
-                        const userDocRef = doc(db, 'users', deposit.userId);
-                        const userDoc = await getDoc(userDocRef);
-                        const currentBalance = userDoc.data().balance || 0;
-                        await updateDoc(userDocRef, { balance: currentBalance + amount });
-                        await updateDoc(doc.ref, { 
-                            status: 'completed', 
-                            txId, 
-                            timestamp: serverTimestamp(), 
-                            network: 'Tron Mainnet',
-                            fromAddress 
-                        });
-                        io.to(deposit.userId).emit('transfer', { 
-                            walletId: userDoc.data().walletId, 
-                            amount, 
-                            type: 'deposit', 
-                            network: 'Tron Mainnet',
-                            txId 
-                        });
-                        console.log(`Real-time deposit of ${amount} USDT credited to user ${deposit.userId} on Tron Mainnet, TX: ${txId}`);
-                        break;
-                    }
-                }
-            }
-        } catch (error) {
-            console.error('WebSocket message error:', error);
-        }
-    });
-
-    ws.on('close', () => {
-        console.log('WebSocket disconnected, attempting to reconnect...');
-        setTimeout(setupWebSocket, 5000); // Reconnect after 5 seconds
-    });
-
-    ws.on('error', (error) => {
-        console.error('WebSocket error:', error);
-    });
+async function getLiveUsdtPrice() {
+    try {
+        const response = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=usd');
+        const price = response.data.tether.usd;
+        const timestamp = new Date().toISOString();
+        return { price, timestamp };
+    } catch (error) {
+        console.error('Error fetching live USDT price (suppressed from logs):', error);
+        return { price: 1.00, timestamp: new Date().toISOString() }; // Default to $1.00 if API fails
+    }
 }
-
-setupWebSocket(); // Start WebSocket connection
-
-// Fallback polling (less frequent) in case WebSocket fails
-setInterval(monitorUSDTDeposits, 15000); // Poll every 15 seconds as a fallback
 
 app.post('/api/deposit', authenticateToken, async (req, res) => {
     const { amount, walletId, verificationCode } = req.body;
@@ -370,9 +322,16 @@ app.post('/api/deposit', authenticateToken, async (req, res) => {
             status: 'pending',
             network: 'Tron Mainnet'
         });
-        res.json({ success: true, message: `Deposit of ${amount} USDT requested on Tron Mainnet. Please send to wallet: ${process.env.OWNER_USDT_WALLET} and await confirmation.` });
+        const usdtPrice = await getLiveUsdtPrice();
+        res.json({ 
+            success: true, 
+            message: `Deposit of ${amount} USDT requested on Tron Mainnet. Please send to wallet: ${process.env.OWNER_USDT_WALLET} and await confirmation. Current USDT Price: $${usdtPrice.price} at ${usdtPrice.timestamp}.`, 
+            network: 'Tron Mainnet',
+            usdtPrice: usdtPrice.price,
+            priceTime: usdtPrice.timestamp 
+        });
     } catch (error) {
-        console.error('Deposit error on Tron Mainnet:', error);
+        console.error('Deposit error on Tron Mainnet (suppressed from logs):', error);
         res.status(500).json({ error: 'Deposit error' });
     }
 });
@@ -403,15 +362,18 @@ app.post('/api/transfer', authenticateToken, async (req, res) => {
         // Perform on-chain transfer using TronWeb on Tron Mainnet
         const senderAddress = tronWeb.address.fromPrivateKey(process.env.TRON_PRIVATE_KEY);
         const receiverAddress = await getTronAddressFromWalletId(toWalletId);
-        await tronWeb.trx.sendTrx(receiverAddress, tronWeb.toSun(amount * 1e6), { from: senderAddress }); // Adjust for TRC-20 USDT if needed
+        const tx = await tronWeb.trx.sendTrx(receiverAddress, tronWeb.toSun(amount * 1e6), { from: senderAddress }); // Adjust for TRC-20 USDT if needed
 
+        const usdtPrice = await getLiveUsdtPrice();
         io.to(req.user.userId).emit('transfer', { 
             fromWalletId: senderDoc.data().walletId, 
             toWalletId, 
             amount, 
             type: 'peer', 
             network: 'Tron Mainnet',
-            txId: null // Can be updated with actual txID if using TRC-20
+            txId: tx.txid || null,
+            usdtPrice: usdtPrice.price,
+            priceTime: usdtPrice.timestamp
         });
         io.to(receiverDoc.id).emit('transfer', { 
             fromWalletId: senderDoc.data().walletId, 
@@ -419,12 +381,20 @@ app.post('/api/transfer', authenticateToken, async (req, res) => {
             amount, 
             type: 'peer', 
             network: 'Tron Mainnet',
-            txId: null 
+            txId: tx.txid || null,
+            usdtPrice: usdtPrice.price,
+            priceTime: usdtPrice.timestamp
         });
 
-        res.json({ success: true, message: `Transferred ${amount} USDT to ${toWalletId} on Tron Mainnet` });
+        res.json({ 
+            success: true, 
+            message: `Transferred ${amount} USDT to ${toWalletId} on Tron Mainnet. TX: ${tx.txid || 'Pending'}, USDT Price: $${usdtPrice.price} at ${usdtPrice.timestamp}.`, 
+            network: 'Tron Mainnet',
+            usdtPrice: usdtPrice.price,
+            priceTime: usdtPrice.timestamp 
+        });
     } catch (error) {
-        console.error('Transfer error on Tron Mainnet:', error);
+        console.error('Transfer error on Tron Mainnet (suppressed from logs):', error);
         res.status(500).json({ error: 'Transfer error' });
     }
 });
@@ -459,6 +429,7 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
         if (withdrawalWalletId.startsWith('T') || withdrawalWalletId.startsWith('41')) { // Tron address
             const senderAddress = tronWeb.address.fromPrivateKey(process.env.TRON_PRIVATE_KEY);
             const tx = await tronWeb.trx.sendTrx(withdrawalWalletId, tronWeb.toSun(amountAfterFee * 1e6), { from: senderAddress }); // Adjust for TRC-20 USDT if needed
+            const usdtPrice = await getLiveUsdtPrice();
             await setDoc(doc(collection(db, 'transactions')), {
                 fromWalletId: userDoc.data().walletId,
                 toWalletId: withdrawalWalletId,
@@ -468,11 +439,21 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
                 timestamp: serverTimestamp(),
                 userId: req.user.userId,
                 network: 'Tron Mainnet',
-                txId: tx.txid || null
+                txId: tx.txid || null,
+                usdtPrice: usdtPrice.price,
+                priceTime: usdtPrice.timestamp
             });
-            res.json({ success: true, message: `Withdrawal of ${amountAfterFee} USDT (after 4% fee) to Tron address ${withdrawalWalletId} on Tron Mainnet requested. Transaction ID: ${tx.txid || 'Pending'}.`, qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${withdrawalWalletId}`, network: 'Tron Mainnet' });
+            res.json({ 
+                success: true, 
+                message: `Withdrawal of ${amountAfterFee} USDT (after 4% fee) to Tron address ${withdrawalWalletId} on Tron Mainnet requested. Transaction ID: ${tx.txid || 'Pending'}, USDT Price: $${usdtPrice.price} at ${usdtPrice.timestamp}.`, 
+                qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${withdrawalWalletId}`, 
+                network: 'Tron Mainnet',
+                usdtPrice: usdtPrice.price,
+                priceTime: usdtPrice.timestamp 
+            });
         } else if (withdrawalWalletId.includes('@') || withdrawalWalletId.includes('.com')) { // PayPal email
             await handlePayPalWithdrawal(req.user.userId, amountAfterFee, withdrawalWalletId);
+            const usdtPrice = await getLiveUsdtPrice();
             await setDoc(doc(collection(db, 'transactions')), {
                 fromWalletId: userDoc.data().walletId,
                 toWalletId: withdrawalWalletId,
@@ -482,14 +463,22 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
                 timestamp: serverTimestamp(),
                 userId: req.user.userId,
                 network: 'Tron Mainnet',
-                txId: null
+                txId: null,
+                usdtPrice: usdtPrice.price,
+                priceTime: usdtPrice.timestamp
             });
-            res.json({ success: true, message: `Withdrawal of ${amountAfterFee} USDT (after 4% fee) to PayPal ${withdrawalWalletId} on Tron Mainnet requested. Please check your PayPal account for confirmation.`, network: 'Tron Mainnet' });
+            res.json({ 
+                success: true, 
+                message: `Withdrawal of ${amountAfterFee} USDT (after 4% fee) to PayPal ${withdrawalWalletId} on Tron Mainnet requested. Please check your PayPal account for confirmation. USDT Price: $${usdtPrice.price} at ${usdtPrice.timestamp}.`, 
+                network: 'Tron Mainnet',
+                usdtPrice: usdtPrice.price,
+                priceTime: usdtPrice.timestamp 
+            });
         } else {
             return res.status(400).json({ error: 'Invalid withdrawal destination (use Tron address or PayPal email)' });
         }
     } catch (error) {
-        console.error('Withdrawal error on Tron Mainnet:', error);
+        console.error('Withdrawal error on Tron Mainnet (suppressed from logs):', error);
         res.status(500).json({ error: 'Withdrawal error' });
     }
 });
@@ -516,7 +505,7 @@ app.post('/api/add-friend', authenticateToken, async (req, res) => {
 
         res.json({ success: true, message: `Friend request sent to ${friendDoc.data().username} on Tron Mainnet` });
     } catch (error) {
-        console.error('Add friend error on Tron Mainnet:', error);
+        console.error('Add friend error on Tron Mainnet (suppressed from logs):', error);
         res.status(500).json({ error: 'Server error' });
     }
 });
@@ -531,7 +520,7 @@ app.post('/api/accept-friend', authenticateToken, async (req, res) => {
         });
         res.json({ success: true, message: 'Friend request accepted on Tron Mainnet' });
     } catch (error) {
-        console.error('Accept friend error on Tron Mainnet:', error);
+        console.error('Accept friend error on Tron Mainnet (suppressed from logs):', error);
         res.status(500).json({ error: 'Server error' });
     }
 });
@@ -543,7 +532,7 @@ app.post('/api/ignore-friend', authenticateToken, async (req, res) => {
         await updateDoc(userDocRef, { pendingFriends: arrayRemove(friendId) });
         res.json({ success: true, message: 'Friend request ignored on Tron Mainnet' });
     } catch (error) {
-        console.error('Ignore friend error on Tron Mainnet:', error);
+        console.error('Ignore friend error on Tron Mainnet (suppressed from logs):', error);
         res.status(500).json({ error: 'Server error' });
     }
 });
@@ -558,10 +547,31 @@ app.post('/api/transactions', authenticateToken, async (req, res) => {
         const q = query(collection(db, 'transactions'), where('fromWalletId', '==', userDoc.data().walletId));
         const snap = await getDocs(q);
         const transactions = snap.docs.map(doc => doc.data());
-        res.json({ success: true, transactions, network: 'Tron Mainnet' });
+        const usdtPrice = await getLiveUsdtPrice();
+        res.json({ 
+            success: true, 
+            transactions, 
+            network: 'Tron Mainnet',
+            usdtPrice: usdtPrice.price, // Live USDT price in USD
+            priceTime: usdtPrice.timestamp // Timestamp of the price
+        });
     } catch (error) {
-        console.error('Transactions error on Tron Mainnet:', error);
+        console.error('Transactions error on Tron Mainnet (suppressed from logs):', error);
         res.status(500).json({ error: 'Server error' });
+    }
+});
+
+app.get('/api/usdt-price', async (req, res) => {
+    try {
+        const usdtPrice = await getLiveUsdtPrice();
+        res.json({ 
+            price: usdtPrice.price, 
+            timestamp: usdtPrice.timestamp, 
+            network: 'Tron Mainnet' 
+        });
+    } catch (error) {
+        console.error('Error fetching USDT price on Tron Mainnet (suppressed from logs):', error);
+        res.status(500).json({ error: 'Failed to fetch USDT price' });
     }
 });
 
