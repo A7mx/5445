@@ -48,7 +48,7 @@ async function refreshUserData() {
       username: data.username,
       avatar: data.avatar,
       walletId: data.walletId,
-      balance: data.balance,
+      balance: data.balance || 0,  // DIS balance
       friends: data.friends || [],
       pendingFriends: data.pendingFriends || []
     };
@@ -60,7 +60,7 @@ async function refreshUserData() {
     showError('Error fetching user data: ' + error.message);
     document.getElementById('username').textContent = 'Error';
     document.getElementById('avatar').src = 'https://via.placeholder.com/40';
-    document.getElementById('balance-amount').textContent = '0 USDT';
+    document.getElementById('balance-amount').textContent = '0 DIS';
   }
 }
 
@@ -78,9 +78,9 @@ function updateUI() {
 
   document.getElementById('username').textContent = userData.username || 'Unknown';
   document.getElementById('discord-id').textContent = `ID: ${userData.userId}`;
-  document.getElementById('balance-amount').textContent = `${userData.balance || 0} USDT`;
+  document.getElementById('balance-amount').textContent = `${userData.balance || 0} DIS`;
   document.getElementById('wallet-id').textContent = userData.walletId || 'N/A';
-  document.getElementById('usdt-balance').textContent = `${userData.balance || 0.000000} USDT`;
+  document.getElementById('dis-balance').textContent = `${userData.balance || 0.000000} DIS`;
 }
 
 function updateFriendsList() {
@@ -140,7 +140,7 @@ function deposit() {
 async function depositFunds() {
   const amount = parseFloat(document.getElementById('deposit-amount').value);
   if (isNaN(amount) || amount <= 0 || amount < 6) {
-    showError('Please enter a valid deposit amount of at least 6 USDT.');
+    showError('Please enter a valid deposit amount of at least 6 DIS.');
     return;
   }
   try {
@@ -155,7 +155,7 @@ async function depositFunds() {
       method: 'POST',
       body: { userId: userData.userId, amount, timestamp: new Date().toISOString(), status: 'pending' }
     });
-    showSuccess(`Deposit of ${amount} USDT requested. Send ${amount} USDT to: ${ownerWallet.wallet} and await confirmation.`);
+    showSuccess(`Deposit of ${amount} DIS requested. Send ${amount} DIS to: ${ownerWallet.wallet} and await confirmation.`);
     document.getElementById('deposit-amount').value = '';
   } catch (error) {
     showError('Deposit failed: ' + error.message);
@@ -199,11 +199,11 @@ async function withdrawFunds() {
   const amount = parseFloat(document.getElementById('withdraw-amount').value);
   const withdrawalWallet = document.getElementById('withdrawal-wallet').value;
   if (isNaN(amount) || amount <= 0 || amount < 6) {
-    showError('Please enter a valid withdrawal amount of at least 6 USDT.');
+    showError('Please enter a valid withdrawal amount of at least 6 DIS.');
     return;
   }
   if (!withdrawalWallet) {
-    showError('Please enter a withdrawal wallet address.');
+    showError('Please enter a withdrawal wallet address or PayPal email.');
     return;
   }
   try {
@@ -323,7 +323,7 @@ async function searchTransactions() {
     const data = await fetchWithToken('/api/transactions');
     const transList = document.getElementById('trans-list');
     transList.innerHTML = data.transactions
-      .map(t => `<p>From: ${t.fromWalletId}, To: ${t.toWalletId}, Amount: ${t.amount} USDT, Time: ${new Date(t.timestamp.seconds * 1000)}${t.type === 'withdrawal' ? ` (Fee: ${t.fee} USDT)` : ''}</p>`)
+      .map(t => `<p>From: ${t.fromWalletId}, To: ${t.toWalletId}, Amount: ${t.amount} DIS, Time: ${new Date(t.timestamp.seconds * 1000)}${t.type === 'withdrawal' ? ` (Fee: ${t.fee} DIS)` : ''}</p>`)
       .join('');
   } catch (error) {
     showError('Error fetching transactions: ' + error.message);
@@ -356,7 +356,7 @@ function filterCoins(type, value = '') {
 }
 
 function buyCoin(coin) {
-  alert(`Buy ${coin} feature coming soon!`);
+  alert(`Buy ${coin} feature coming soon! Implement an exchange or marketplace to purchase DIS with PayPal or fiat.`);
 }
 
 showSection('deposit');
