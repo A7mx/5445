@@ -8,72 +8,102 @@
 </head>
 <body>
   <header>
-    <h1 id="logo">DISWallet</h1>
-    <div id="user-profile">
-      <div id="balance" onclick="toggleDeposit()">
-        <span id="balance-amount">0 USDT</span>
-        <div id="deposit-option" class="hidden">
-          <button onclick="deposit()">Deposit</button>
+    <div class="header-content">
+      <h1 id="logo">DISWallet</h1>
+      <div id="user-profile">
+        <img id="avatar" src="https://via.placeholder.com/40" alt="Avatar" onclick="toggleUserInfo()">
+        <div id="user-info" class="hidden">
+          <span id="username">Loading...</span>
+          <span id="discord-id"></span>
+          <button id="logout" onclick="logout()">Logout</button>
         </div>
       </div>
-      <img id="avatar" src="https://via.placeholder.com/40" alt="Avatar" onclick="toggleUserInfo()">
-      <div id="user-info" class="hidden">
-        <span id="username">Loading...</span>
-        <span id="discord-id"></span>
-        <button id="logout" onclick="logout()">Logout</button>
-      </div>
     </div>
+    <nav class="header-actions">
+      <button onclick="showSection('deposit')" class="action-btn deposit">Deposit</button>
+      <button onclick="showSection('exchange')" class="action-btn exchange">Exchange</button>
+      <button onclick="showSection('transfer')" class="action-btn send">Send</button>
+      <button onclick="showSection('transactions')" class="action-btn history">History</button>
+      <span class="notifications">🔔</span>
+      <span class="menu">⋮</span>
+    </nav>
   </header>
-  <div class="layout">
-    <aside class="sidebar">
-      <nav>
-        <ul>
-          <li onclick="showSection('deposit')">Deposit</li>
-          <li onclick="showSection('transfer')">Transfer</li>
-          <li onclick="showSection('withdraw')">Withdraw</li>
-          <li onclick="showSection('friends')">Friends</li>
-          <li onclick="showSection('transactions')">Transactions</li>
+  <main class="dashboard">
+    <section class="balance-section">
+      <div class="balance-card">
+        <h2>Total Balance</h2>
+        <div id="balance-amount" class="balance-value">0.00 USDT</div>
+        <p class="last-transaction">Last transaction: <span id="last-transaction">No transactions yet</span></p>
+      </div>
+      <div class="coin-list">
+        <div class="coin-filter">
+          <button id="all-coins" class="coin-filter-btn active" onclick="filterCoins('all')">All</button>
+          <input type="text" id="coin-search" placeholder="Search a Coin" oninput="filterCoins('search', this.value)">
+        </div>
+        <ul id="coin-list">
+          <li class="coin-item" data-coin="usdt">
+            <img src="/images/usdt.png" alt="USDT" class="coin-icon">
+            <span class="coin-name">USDT</span>
+            <span id="usdt-balance" class="coin-balance">0.000000 USDT</span>
+            <span class="coin-value">0.00 USD</span>
+            <span class="coin-change">-0.0035 (-0.03%)</span>
+            <button class="buy-btn" onclick="buyCoin('usdt')">Buy</button>
+          </li>
         </ul>
-      </nav>
-    </aside>
-    <main class="content">
-      <section id="deposit" class="card active">
+      </div>
+    </section>
+    <section class="content-sections">
+      <section id="deposit" class="content-card active">
         <h2>Deposit Funds</h2>
         <p>Your Wallet ID: <span id="wallet-id">Loading...</span></p>
         <img id="qr-code" src="https://via.placeholder.com/150" alt="QR Code for Deposit">
-        <input id="deposit-amount" type="number" placeholder="Amount to Deposit (USDT)" step="0.01">
+        <input id="deposit-amount" type="number" placeholder="Amount to Deposit (USDT, min 6 USDT)" step="0.01">
         <button onclick="depositFunds()">Deposit Now</button>
-        <p class="tip">Send USDT to the owner wallet address provided after clicking "Deposit Now".</p>
+        <p class="tip">Send USDT to the owner wallet address provided after clicking "Deposit Now". Minimum deposit is 6 USDT.</p>
       </section>
-      <section id="transfer" class="card">
+      <section id="exchange" class="content-card">
+        <h2>Exchange Funds</h2>
+        <p>Exchange feature coming soon!</p>
+      </section>
+      <section id="transfer" class="content-card">
         <h2>Transfer Funds</h2>
         <input id="transfer-to-wallet" placeholder="Recipient Wallet ID">
         <input id="transfer-amount" type="number" placeholder="Amount to Transfer (USDT)" step="0.01">
         <button onclick="transferFunds()">Transfer Now</button>
         <p class="tip">Transfer USDT to another user instantly using their wallet ID.</p>
       </section>
-      <section id="withdraw" class="card">
+      <section id="withdraw" class="content-card">
         <h2>Withdraw Funds</h2>
-        <input id="withdraw-amount" type="number" placeholder="Amount to Withdraw (USDT)" step="0.01">
-        <input id="withdrawal-wallet" placeholder="Your USDT Wallet Address">
-        <p>5% Withdrawal Fee Will Apply (Fee Goes to Owner Wallet)</p>
+        <input id="withdraw-amount" type="number" placeholder="Amount to Withdraw (USDT, min 6 USDT)" step="0.01">
+        <input id="withdrawal-wallet" placeholder="Your TRC-20 USDT Wallet Address (e.g., TJfMChcqXQoWSpim2XzBjwH1s84BbwzZzZ)">
+        <p>5% Withdrawal Fee Will Apply (Fee Goes to Owner Wallet). Withdrawal processed manually—check status in History.</p>
         <button onclick="withdrawFunds()">Withdraw Now</button>
         <img id="withdraw-qr" src="https://via.placeholder.com/150" alt="QR Code for Withdrawal">
-        <p class="tip">Withdraw USDT to your specified wallet address.</p>
+        <p class="tip">Withdraw USDT to your wallet. Minimum withdrawal is 6 USDT. No external login required.</p>
       </section>
-      <section id="friends" class="card">
+      <section id="friends" class="content-card">
         <h2>Friends</h2>
         <input id="friend-id" placeholder="Friend's Discord ID">
         <button onclick="addFriend()">Send Friend Request</button>
         <div id="pending-list"></div>
         <div id="friends-list"></div>
       </section>
-      <section id="transactions" class="card">
+      <section id="transactions" class="content-card">
         <h2>Transaction History</h2>
         <button onclick="searchTransactions()">View Transactions</button>
         <div id="trans-list"></div>
       </section>
-    </main>
+    </section>
+    <aside class="sidebar">
+      <div class="sidebar-section tips">
+        <h3>Tips</h3>
+        <p>Keep your wallet secure by using strong passwords and enabling two-factor authentication.</p>
+      </div>
+      <div class="sidebar-section news">
+        <h3>News</h3>
+        <p>Latest crypto updates: USDT market stable, Bitcoin reaches new highs!</p>
+      </div>
+    </aside>
     <aside class="chat-panel hidden">
       <div id="chat-header">
         <span id="chat-with"></span>
@@ -89,7 +119,7 @@
       <input id="chat-input" placeholder="Type a message">
       <button id="chat-send" onclick="sendChat()">Send</button>
     </aside>
-  </div>
+  </main>
   <footer>
     <p>© 2025 DISWallet. All rights reserved. | <a href="/terms">Terms</a> | <a href="/privacy">Privacy</a></p>
     <img src="/images/trust-badges.png" alt="Trust Badges" class="trust-badges">
