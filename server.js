@@ -7,10 +7,9 @@ const bodyParser = require('body-parser');
 const path = require('path');
 const socketIo = require('socket.io');
 const http = require('http');
-const Web3 = require('web3');
-const { ethers } = require('ethers');
+const TronWeb = require('tronweb');
 
-const requiredEnv = ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI', 'FIREBASE_API_KEY', 'DIS_CONTRACT_ADDRESS', 'DIS_PRIVATE_KEY'];
+const requiredEnv = ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI', 'FIREBASE_API_KEY', 'OWNER_USDT_WALLET', 'TRON_PRIVATE_KEY'];
 requiredEnv.forEach(key => {
     if (!process.env[key]) {
         console.error(`Missing environment variable: ${key}`);
@@ -43,29 +42,18 @@ const server = http.createServer(app);
 const io = socketIo(server);
 const oauth = new DiscordOAuth2();
 
-// Initialize Web3 for Ethereum
-const web3 = new Web3('https://mainnet.infura.io/v3/YOUR_INFURA_PROJECT_ID'); // Replace with your Infura project ID or another Ethereum node
-const disContractAddress = process.env.DIS_CONTRACT_ADDRESS;
-const disPrivateKey = process.env.DIS_PRIVATE_KEY;
-
-const disABI = [
-    {
-        "constant": true,
-        "inputs": [{"name": "_owner", "type": "address"}],
-        "name": "balanceOf",
-        "outputs": [{"name": "balance", "type": "uint256"}],
-        "type": "function"
-    },
-    {
-        "constant": false,
-        "inputs": [{"name": "_to", "type": "address"}, {"name": "_value", "type": "uint256"}],
-        "name": "transfer",
-        "outputs": [{"name": "success", "type": "bool"}],
-        "type": "function"
-    }
-];
-
-const disContract = new web3.eth.Contract(disABI, disContractAddress);
+// Initialize TronWeb for TRC-20 USDT
+let tronWeb;
+try {
+    tronWeb = new TronWeb({
+        fullHost: 'https://api.trongrid.io', // TronGrid public node
+        privateKey: process.env.TRON_PRIVATE_KEY // Use environment variable for your Tron wallet (TEq4NrK2Sov4fJetbcV577JvK5FkzhLVYw)
+    });
+    console.log('TronWeb initialized successfully');
+} catch (error) {
+    console.error('Failed to initialize TronWeb:', error);
+    process.exit(1);
+}
 
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -156,10 +144,10 @@ app.get('/auth/discord/callback', async (req, res) => {
                 username: user.username,
                 avatar: `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png`,
                 walletId: generateWalletId(),
-                balance: 0,  // DIS balance in Firestore (plain number)
+                balance: 0,  // USDT balance in Firestore (plain number)
                 friends: [],
                 pendingFriends: [],
-                ethereumAddress: ''  // Optional: store user's Ethereum address
+                tronAddress: ''  // Optional: store user's Tron address
             });
             console.log('Step 3 completed: Created user:', user.username);
         } else {
@@ -207,7 +195,7 @@ app.post('/api/user', authenticateToken, async (req, res) => {
             username: data.username,
             avatar: data.avatar,
             walletId: data.walletId,
-            balance: data.balance || 0,  // DIS balance
+            balance: data.balance || 0,  // USDT balance
             friends: friendsData.filter(f => f),
             pendingFriends: pendingFriendsData.filter(f => f)
         };
@@ -220,7 +208,7 @@ app.post('/api/user', authenticateToken, async (req, res) => {
 });
 
 app.get('/api/owner-wallet', (req, res) => {
-    const ownerWallet = process.env.DIS_CONTRACT_ADDRESS; // Use DIS contract as the owner wallet for deposits
+    const ownerWallet = process.env.OWNER_USDT_WALLET; // Use your new Tron USDT wallet (TEq4NrK2Sov4fJetbcV577JvK5FkzhLVYw)
     console.log('Returning owner wallet:', ownerWallet);
     res.json({ wallet: ownerWallet, qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${ownerWallet}` });
 });
@@ -241,17 +229,17 @@ app.post('/api/pending-deposit', authenticateToken, async (req, res) => {
     }
 });
 
-async function monitorDISDeposits() {
+async function monitorUSDTDeposits() {
     try {
-        // Monitor Ethereum transactions to DIS contract every 1 second
-        const events = await disContract.getPastEvents('Transfer', {
-            fromBlock: 'latest' - 100, // Look back 100 blocks
-            toBlock: 'latest'
-        });
-        for (const event of events) {
-            const { from, to, value } = event.returnValues;
-            if (to === process.env.DIS_CONTRACT_ADDRESS && from !== '0x0000000000000000000000000000000000000000') { // Deposit to contract
-                const amount = parseFloat(web3.utils.fromWei(value, 'ether'));
+        // Monitor Tron blockchain for USDT (TRC-20) transactions to OWNER_USDT_WALLET every 1 second
+        const transactions = await tronWeb.trx.getTransactionsToAddress(process.env.OWNER_USDT_WALLET, 50); // Get last 50 transactions
+        for (const tx of transactions) {
+            if (tx.contractData && tx.contractData.token_name === 'USDT' && tx.contractData.amount) {
+                const amount = tx.contractData.amount / 1e6; // Convert TRC-20 USDT (6 decimals)
+                const txId = tx.txID;
+                const fromAddress = tx.contractData.owner_address;
+
+                // Find pending deposits in Firestore
                 const depositsQuery = query(collection(db, 'deposits'), where('status', '==', 'pending'));
                 const depositsSnap = await getDocs(depositsQuery);
                 for (const doc of depositsSnap.docs) {
@@ -261,7 +249,7 @@ async function monitorDISDeposits() {
                         const userDoc = await getDoc(userDocRef);
                         const currentBalance = userDoc.data().balance || 0;
                         await updateDoc(userDocRef, { balance: currentBalance + amount });
-                        await updateDoc(doc.ref, { status: 'completed', txHash: event.transactionHash, timestamp: serverTimestamp() });
+                        await updateDoc(doc.ref, { status: 'completed', txId, timestamp: serverTimestamp() });
                         io.to(deposit.userId).emit('transfer', { walletId: userDoc.data().walletId, amount, type: 'deposit' });
                         break;
                     }
@@ -269,20 +257,20 @@ async function monitorDISDeposits() {
             }
         }
     } catch (error) {
-        console.error('Error monitoring DIS deposits:', error);
-        if (error.response && error.response.status === 429) { // Rate limit handling
-            console.warn('Rate limit exceeded on Ethereum API, backing off...');
+        console.error('Error monitoring USDT deposits:', error);
+        if (error.response && error.response.status === 429) { // Rate limit handling for TronGrid
+            console.warn('Rate limit exceeded on TronGrid API, backing off...');
             await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds before retrying
         }
     }
 }
 
 // Check every 1 second (1000 milliseconds)
-setInterval(monitorDISDeposits, 1000);
+setInterval(monitorUSDTDeposits, 1000);
 
 app.post('/api/deposit', authenticateToken, async (req, res) => {
     const { amount, walletId, verificationCode } = req.body;
-    if (!amount || amount <= 0 || !walletId || amount < 6) return res.status(400).json({ error: 'Invalid deposit amount (minimum 6 DIS)' });
+    if (!amount || amount <= 0 || !walletId || amount < 6) return res.status(400).json({ error: 'Invalid deposit amount (minimum 6 USDT)' });
     try {
         // Verify 2FA (simplified, integrate with Firebase Auth or TOTP)
         const userDoc = await getDoc(doc(db, 'users', req.user.userId));
@@ -298,7 +286,7 @@ app.post('/api/deposit', authenticateToken, async (req, res) => {
             timestamp: new Date().toISOString(),
             status: 'pending'
         });
-        res.json({ success: true, message: `Deposit of ${amount} DIS requested. Please send to wallet: ${process.env.DIS_CONTRACT_ADDRESS} and await confirmation.` });
+        res.json({ success: true, message: `Deposit of ${amount} USDT requested. Please send to wallet: ${process.env.OWNER_USDT_WALLET} and await confirmation.` });
     } catch (error) {
         console.error('Deposit error:', error);
         res.status(500).json({ error: 'Deposit error' });
@@ -328,39 +316,35 @@ app.post('/api/transfer', authenticateToken, async (req, res) => {
         await updateDoc(senderDocRef, { balance: newSenderBalance });
         await updateDoc(receiverDocRef, { balance: newReceiverBalance });
 
-        // Simulate on-chain transfer (replace with actual Ethereum transfer if needed)
-        const senderAddress = web3.eth.accounts.privateKeyToAccount(disPrivateKey).address;
-        const receiverAddress = await getEthereumAddressFromWalletId(toWalletId);
-        await disContract.methods.transfer(receiverAddress, web3.utils.toWei(amount.toString(), 'ether')).send({
-            from: senderAddress,
-            gas: 21000,
-            gasPrice: web3.utils.toWei('20', 'gwei')
-        });
+        // Simulate on-chain transfer (replace with actual Tron transfer if needed)
+        const senderAddress = tronWeb.address.fromPrivateKey(process.env.TRON_PRIVATE_KEY);
+        const receiverAddress = await getTronAddressFromWalletId(toWalletId);
+        await tronWeb.trx.sendTrx(receiverAddress, tronWeb.toSun(amount * 1e6), { from: senderAddress }); // Adjust for TRC-20 USDT transfer
 
         io.to(req.user.userId).emit('transfer', { fromWalletId: senderDoc.data().walletId, toWalletId, amount, type: 'peer' });
         io.to(receiverDoc.id).emit('transfer', { fromWalletId: senderDoc.data().walletId, toWalletId, amount, type: 'peer' });
 
-        res.json({ success: true, message: `Transferred ${amount} DIS to ${toWalletId}` });
+        res.json({ success: true, message: `Transferred ${amount} USDT to ${toWalletId}` });
     } catch (error) {
         console.error('Transfer error:', error);
         res.status(500).json({ error: 'Transfer error' });
     }
 });
 
-// Helper function to map DISWallet walletId to Ethereum address
-async function getEthereumAddressFromWalletId(walletId) {
+// Helper function to map DISWallet walletId to Tron address
+async function getTronAddressFromWalletId(walletId) {
     const usersQuery = query(collection(db, 'users'), where('walletId', '==', walletId));
     const usersSnap = await getDocs(usersQuery);
     if (!usersSnap.empty) {
         const userDoc = usersSnap.docs[0];
-        return userDoc.data().ethereumAddress || '0x0000000000000000000000000000000000000000'; // Default or fetch actual address
+        return userDoc.data().tronAddress || 'TEq4NrK2Sov4fJetbcV577JvK5FkzhLVYw'; // Default or fetch actual address
     }
     throw new Error('Wallet ID not found');
 }
 
 app.post('/api/withdraw', authenticateToken, async (req, res) => {
-    const { amount, withdrawalWalletId } = req.body; // withdrawalWalletId can be Ethereum address or PayPal email
-    if (!amount || amount <= 0 || !withdrawalWalletId || amount < 6) return res.status(400).json({ error: 'Invalid withdrawal request (minimum 6 DIS)' });
+    const { amount, withdrawalWalletId } = req.body; // withdrawalWalletId can be Tron address or PayPal email
+    if (!amount || amount <= 0 || !withdrawalWalletId || amount < 6) return res.status(400).json({ error: 'Invalid withdrawal request (minimum 6 USDT)' });
     try {
         const userDocRef = doc(db, 'users', req.user.userId);
         const userDoc = await getDoc(userDocRef);
@@ -374,13 +358,9 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
         await updateDoc(userDocRef, { balance: newBalance });
 
         // Handle withdrawal based on destination type
-        if (withdrawalWalletId.startsWith('0x')) { // Ethereum address
-            const senderAddress = web3.eth.accounts.privateKeyToAccount(disPrivateKey).address;
-            await disContract.methods.transfer(withdrawalWalletId, web3.utils.toWei(amountAfterFee.toString(), 'ether')).send({
-                from: senderAddress,
-                gas: 21000,
-                gasPrice: web3.utils.toWei('20', 'gwei')
-            });
+        if (withdrawalWalletId.startsWith('T') || withdrawalWalletId.startsWith('41')) { // Tron address
+            const senderAddress = tronWeb.address.fromPrivateKey(process.env.TRON_PRIVATE_KEY);
+            await tronWeb.trx.sendTrx(withdrawalWalletId, tronWeb.toSun(amountAfterFee * 1e6), { from: senderAddress }); // Adjust for TRC-20 USDT transfer
             await setDoc(doc(collection(db, 'transactions')), {
                 fromWalletId: userDoc.data().walletId,
                 toWalletId: withdrawalWalletId,
@@ -390,7 +370,7 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
                 timestamp: serverTimestamp(),
                 userId: req.user.userId
             });
-            res.json({ success: true, message: `Withdrawal of ${amountAfterFee} DIS (after 5% fee) to Ethereum address ${withdrawalWalletId} requested. Transaction processed on blockchain.`, qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${withdrawalWalletId}` });
+            res.json({ success: true, message: `Withdrawal of ${amountAfterFee} USDT (after 5% fee) to Tron address ${withdrawalWalletId} requested. Transaction processed on blockchain.`, qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${withdrawalWalletId}` });
         } else if (withdrawalWalletId.includes('@') || withdrawalWalletId.includes('.com')) { // PayPal email
             await handlePayPalWithdrawal(req.user.userId, amountAfterFee, withdrawalWalletId);
             await setDoc(doc(collection(db, 'transactions')), {
@@ -402,9 +382,9 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
                 timestamp: serverTimestamp(),
                 userId: req.user.userId
             });
-            res.json({ success: true, message: `Withdrawal of ${amountAfterFee} DIS (after 5% fee) to PayPal ${withdrawalWalletId} requested. Please check your PayPal account for confirmation.` });
+            res.json({ success: true, message: `Withdrawal of ${amountAfterFee} USDT (after 5% fee) to PayPal ${withdrawalWalletId} requested. Please check your PayPal account for confirmation.` });
         } else {
-            return res.status(400).json({ error: 'Invalid withdrawal destination (use Ethereum address or PayPal email)' });
+            return res.status(400).json({ error: 'Invalid withdrawal destination (use Tron address or PayPal email)' });
         }
     } catch (error) {
         console.error('Withdrawal error:', error);
@@ -414,12 +394,12 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
 
 // Helper function for PayPal withdrawal (simplified, requires PayPal API integration)
 async function handlePayPalWithdrawal(userId, amount, paypalEmail) {
-    // Use PayPal API to convert DIS to USD and transfer to PayPal (requires PayPal Developer account and API keys)
+    // Use PayPal API to convert USDT to USD and transfer to PayPal (requires PayPal Developer account and API keys)
     // Example: Use PayPal REST API or Payouts API
-    console.log(`Simulating PayPal withdrawal of ${amount} DIS to ${paypalEmail} for user ${userId}`);
+    console.log(`Simulating PayPal withdrawal of ${amount} USDT to ${paypalEmail} for user ${userId}`);
     // Placeholder: Implement actual PayPal API call here (e.g., using paypal-rest-sdk or paypal-checkout)
-    // Note: PayPal supports crypto transfers (web results show PayPal allows buying, selling, holding, and transferring crypto like Bitcoin, Ethereum, etc.)
-    // You’ll need to convert DIS to USD via an exchange or partnership and use PayPal’s API to send funds
+    // Note: PayPal supports USDT transfers (via partnerships or exchanges like Binance, Kraken)
+    // You’ll need to convert USDT to USD via an exchange and use PayPal’s API to send funds
 }
 
 app.post('/api/add-friend', authenticateToken, async (req, res) => {
