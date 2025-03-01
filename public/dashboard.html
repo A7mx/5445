@@ -43,23 +43,23 @@
         <img id="qr-code" src="https://via.placeholder.com/150" alt="QR Code for Deposit">
         <input id="deposit-amount" type="number" placeholder="Amount to Deposit (USDT)" step="0.01">
         <button onclick="depositFunds()">Deposit Now</button>
-        <p class="tip">Scan the QR code or use your wallet ID to deposit USDT securely.</p>
+        <p class="tip">Send USDT to the owner wallet address provided after clicking "Deposit Now".</p>
       </section>
       <section id="transfer" class="card">
         <h2>Transfer Funds</h2>
-        <input id="transfer-to-wallet" placeholder="Recipient Wallet ID (or 'owner' for owner wallet)">
+        <input id="transfer-to-wallet" placeholder="Recipient Wallet ID">
         <input id="transfer-amount" type="number" placeholder="Amount to Transfer (USDT)" step="0.01">
         <button onclick="transferFunds()">Transfer Now</button>
-        <p class="tip">Transfer USDT to another wallet or the owner wallet instantly using their wallet ID.</p>
+        <p class="tip">Transfer USDT to another user instantly using their wallet ID.</p>
       </section>
       <section id="withdraw" class="card">
         <h2>Withdraw Funds</h2>
         <input id="withdraw-amount" type="number" placeholder="Amount to Withdraw (USDT)" step="0.01">
-        <input id="withdrawal-wallet" placeholder="Withdrawal Wallet ID">
+        <input id="withdrawal-wallet" placeholder="Your USDT Wallet Address">
         <p>5% Withdrawal Fee Will Apply (Fee Goes to Owner Wallet)</p>
         <button onclick="withdrawFunds()">Withdraw Now</button>
         <img id="withdraw-qr" src="https://via.placeholder.com/150" alt="QR Code for Withdrawal">
-        <p class="tip">Receive your USDT with a secure QR code for the withdrawal wallet.</p>
+        <p class="tip">Withdraw USDT to your specified wallet address.</p>
       </section>
       <section id="friends" class="card">
         <h2>Friends</h2>
