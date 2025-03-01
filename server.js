@@ -11,7 +11,10 @@ const crypto = require('crypto');
 
 const requiredEnv = ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI', 'FIREBASE_API_KEY', 'ENCRYPTION_KEY', 'OWNER_USDT_WALLET'];
 requiredEnv.forEach(key => {
-    if (!process.env[key]) throw new Error(`Missing env var: ${key}`);
+    if (!process.env[key]) {
+        console.error(`Missing environment variable: ${key}`);
+        process.exit(1);
+    }
 });
 
 const ENCRYPTION_KEY = Buffer.from(process.env.ENCRYPTION_KEY, 'hex');
@@ -44,8 +47,15 @@ const firebaseConfig = {
     measurementId: process.env.FIREBASE_MEASUREMENT_ID
 };
 
-const appFirebase = initializeApp(firebaseConfig);
-const db = getFirestore(appFirebase);
+let db;
+try {
+    const appFirebase = initializeApp(firebaseConfig);
+    db = getFirestore(appFirebase);
+    console.log('Firestore initialized successfully');
+} catch (error) {
+    console.error('Failed to initialize Firestore:', error);
+    process.exit(1);
+}
 
 const app = express();
 const server = http.createServer(app);
@@ -66,7 +76,7 @@ function generateWalletId() {
 async function authenticateToken(req, res, next) {
     const token = req.headers['authorization']?.split(' ')[1];
     if (!token) {
-        console.log('No token provided');
+        console.log('No token provided in request');
         return res.status(401).json({ error: 'Unauthorized' });
     }
     try {
@@ -79,7 +89,7 @@ async function authenticateToken(req, res, next) {
         console.log('Authenticated user:', req.user.userId);
         next();
     } catch (error) {
-        console.error('Auth error:', error);
+        console.error('Authentication error:', error);
         res.status(500).json({ error: 'Server error' });
     }
 }
@@ -104,12 +114,12 @@ app.get('/auth/discord/callback', async (req, res) => {
     console.log('Received OAuth callback with code:', code);
 
     if (!code) {
-        console.error('No code provided in callback');
+        console.error('No authorization code provided in callback');
         return res.status(400).send('No authorization code provided');
     }
 
     try {
-        console.log('Attempting to exchange code for token...');
+        console.log('Step 1: Exchanging code for access token...');
         const tokenData = await oauth.tokenRequest({
             clientId: process.env.DISCORD_CLIENT_ID,
             clientSecret: process.env.DISCORD_CLIENT_SECRET,
@@ -118,14 +128,22 @@ app.get('/auth/discord/callback', async (req, res) => {
             grantType: 'authorization_code',
             redirectUri: process.env.DISCORD_REDIRECT_URI,
         });
-        console.log('OAuth token received:', { access_token: tokenData.access_token, expires_in: tokenData.expires_in });
+        console.log('Step 1 completed: OAuth token received:', {
+            access_token: tokenData.access_token,
+            expires_in: tokenData.expires_in,
+            token_type: tokenData.token_type
+        });
 
-        console.log('Fetching user data with access token...');
+        console.log('Step 2: Fetching user data with access token...');
         const user = await oauth.getUser(tokenData.access_token);
-        console.log('Fetched Discord user:', { id: user.id, username: user.username, avatar: user.avatar });
+        console.log('Step 2 completed: Fetched Discord user:', {
+            id: user.id,
+            username: user.username,
+            avatar: user.avatar
+        });
 
         const userDocRef = doc(db, 'users', user.id);
-        console.log('Checking Firestore for user:', user.id);
+        console.log('Step 3: Checking user in Firestore:', user.id);
         const userDoc = await getDoc(userDocRef);
         if (!userDoc.exists()) {
             console.log('User does not exist, creating new user...');
@@ -137,26 +155,29 @@ app.get('/auth/discord/callback', async (req, res) => {
                 friends: [],
                 pendingFriends: []
             });
-            console.log('Created user:', user.username);
+            console.log('Step 3 completed: Created user:', user.username);
         } else {
-            console.log('User exists:', userDoc.data());
+            console.log('Step 3 completed: User exists:', userDoc.data());
         }
 
         const sessionToken = generateToken();
-        console.log('Generating session token:', sessionToken);
+        console.log('Step 4: Generated session token:', sessionToken);
+
+        console.log('Step 5: Saving session to Firestore...');
         await setDoc(doc(db, 'sessions', sessionToken), {
             userId: user.id,
             createdAt: serverTimestamp()
         });
-        console.log('Session token saved to Firestore');
+        console.log('Step 5 completed: Session token saved to Firestore');
 
         const redirectUrl = `/dashboard.html?token=${sessionToken}`;
-        console.log('Redirecting to:', redirectUrl);
+        console.log('Step 6: Redirecting to:', redirectUrl);
         res.redirect(redirectUrl);
+        console.log('Step 6 completed: Redirect sent to client');
     } catch (error) {
-        console.error('Error in OAuth callback:', error.message);
+        console.error('OAuth callback failed at some step:', error.message);
         if (error.response) {
-            console.error('Error response data:', error.response.data);
+            console.error('Discord API error response:', error.response.data);
         }
         res.status(500).send(`Authentication failed: ${error.message}`);
     }
@@ -165,7 +186,10 @@ app.get('/auth/discord/callback', async (req, res) => {
 app.post('/api/user', authenticateToken, async (req, res) => {
     try {
         const userDoc = await getDoc(doc(db, 'users', req.user.userId));
-        if (!userDoc.exists()) return res.status(404).json({ error: 'User not found' });
+        if (!userDoc.exists()) {
+            console.log('User not found:', req.user.userId);
+            return res.status(404).json({ error: 'User not found' });
+        }
         const data = userDoc.data();
         const friendsData = await Promise.all((data.friends || []).map(async friendId => {
             const friendDoc = await getDoc(doc(db, 'users', friendId));
@@ -208,6 +232,7 @@ app.post('/api/deposit', authenticateToken, async (req, res) => {
         await updateDoc(userDocRef, { balance: encrypt(newBalance.toString()) });
         res.json({ success: true, message: `Deposit of ${amount} USDT requested. Please send to owner wallet and await confirmation.` });
     } catch (error) {
+        console.error('Deposit error:', error);
         res.status(500).json({ error: 'Deposit error' });
     }
 });
@@ -304,6 +329,7 @@ app.post('/api/accept-friend', authenticateToken, async (req, res) => {
         });
         res.json({ success: true, message: 'Friend request accepted' });
     } catch (error) {
+        console.error('Accept friend error:', error);
         res.status(500).json({ error: 'Server error' });
     }
 });
@@ -315,6 +341,7 @@ app.post('/api/ignore-friend', authenticateToken, async (req, res) => {
         await updateDoc(userDocRef, { pendingFriends: arrayRemove(friendId) });
         res.json({ success: true, message: 'Friend request ignored' });
     } catch (error) {
+        console.error('Ignore friend error:', error);
         res.status(500).json({ error: 'Server error' });
     }
 });
@@ -331,14 +358,21 @@ app.post('/api/transactions', authenticateToken, async (req, res) => {
         const transactions = snap.docs.map(doc => doc.data());
         res.json({ success: true, transactions });
     } catch (error) {
+        console.error('Transactions error:', error);
         res.status(500).json({ error: 'Server error' });
     }
 });
 
 io.on('connection', socket => {
     console.log('Socket connected:', socket.id);
-    socket.on('join', userId => socket.join(userId));
-    socket.on('chat', ({ toId, message }) => io.to(toId).emit('chat', { from: req.user.userId, message }));
+    socket.on('join', userId => {
+        console.log('User joined socket room:', userId);
+        socket.join(userId);
+    });
+    socket.on('chat', ({ toId, message }) => {
+        console.log('Chat message from:', socket.id, 'to:', toId, 'message:', message);
+        io.to(toId).emit('chat', { from: socket.id, message });
+    });
 });
 
 const PORT = process.env.PORT || 5000;
