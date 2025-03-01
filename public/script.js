@@ -80,6 +80,7 @@ function updateUI() {
   document.getElementById('discord-id').textContent = `ID: ${userData.userId}`;
   document.getElementById('balance-amount').textContent = `${userData.balance || 0} USDT`;
   document.getElementById('wallet-id').textContent = userData.walletId || 'N/A';
+  document.getElementById('usdt-balance').textContent = `${userData.balance || 0.000000} USDT`;
 }
 
 function updateFriendsList() {
@@ -138,14 +139,23 @@ function deposit() {
 
 async function depositFunds() {
   const amount = parseFloat(document.getElementById('deposit-amount').value);
-  if (isNaN(amount) || amount <= 0) {
-    showError('Please enter a valid deposit amount.');
+  if (isNaN(amount) || amount <= 0 || amount < 6) {
+    showError('Please enter a valid deposit amount of at least 6 USDT.');
     return;
   }
   try {
+    const verificationCode = prompt('Enter your 2FA code:');
+    if (!verificationCode) {
+      showError('Verification required.');
+      return;
+    }
     const ownerWallet = await fetchWithToken('/api/owner-wallet', { method: 'GET' });
-    const data = await fetchWithToken('/api/deposit', { body: { amount, walletId: userData.walletId } });
-    showSuccess(`${data.message} Send ${amount} USDT to: ${ownerWallet.wallet}`);
+    await fetchWithToken('/api/deposit', { body: { amount, walletId: userData.walletId, verificationCode } });
+    await fetchWithToken('/api/pending-deposit', {
+      method: 'POST',
+      body: { userId: userData.userId, amount, timestamp: new Date().toISOString(), status: 'pending' }
+    });
+    showSuccess(`Deposit of ${amount} USDT requested. Send ${amount} USDT to: ${ownerWallet.wallet} and await confirmation.`);
     document.getElementById('deposit-amount').value = '';
   } catch (error) {
     showError('Deposit failed: ' + error.message);
@@ -153,10 +163,10 @@ async function depositFunds() {
 }
 
 function showSection(sectionId) {
-  document.querySelectorAll('.card').forEach(card => card.classList.remove('active'));
+  document.querySelectorAll('.content-card').forEach(card => card.classList.remove('active'));
   document.getElementById(sectionId).classList.add('active');
-  document.querySelectorAll('.sidebar nav ul li').forEach(li => li.classList.remove('active'));
-  document.querySelector(`.sidebar nav ul li[onclick="showSection('${sectionId}')"]`).classList.add('active');
+  document.querySelectorAll('.header-actions button').forEach(btn => btn.classList.remove('active'));
+  document.querySelector(`.header-actions button[onclick="showSection('${sectionId}')"]`).classList.add('active');
 }
 
 async function transferFunds() {
@@ -188,8 +198,8 @@ async function transferFunds() {
 async function withdrawFunds() {
   const amount = parseFloat(document.getElementById('withdraw-amount').value);
   const withdrawalWallet = document.getElementById('withdrawal-wallet').value;
-  if (isNaN(amount) || amount <= 0) {
-    showError('Please enter a valid withdrawal amount.');
+  if (isNaN(amount) || amount <= 0 || amount < 6) {
+    showError('Please enter a valid withdrawal amount of at least 6 USDT.');
     return;
   }
   if (!withdrawalWallet) {
@@ -199,6 +209,7 @@ async function withdrawFunds() {
   try {
     const data = await fetchWithToken('/api/withdraw', { body: { amount, withdrawalWalletId: withdrawalWallet } });
     showSuccess(data.message);
+    document.getElementById('withdraw-qr').src = data.qrCode || 'https://via.placeholder.com/150';
     refreshUserData();
     document.getElementById('withdraw-amount').value = '';
     document.getElementById('withdrawal-wallet').value = '';
@@ -330,6 +341,22 @@ function showError(message) {
 function logout() {
   localStorage.clear();
   window.location.href = '/';
+}
+
+function filterCoins(type, value = '') {
+  const coins = document.querySelectorAll('.coin-item');
+  if (type === 'all') {
+    coins.forEach(coin => coin.style.display = 'flex');
+  } else if (type === 'search') {
+    coins.forEach(coin => {
+      const coinName = coin.getAttribute('data-coin').toLowerCase();
+      coin.style.display = coinName.includes(value.toLowerCase()) ? 'flex' : 'none';
+    });
+  }
+}
+
+function buyCoin(coin) {
+  alert(`Buy ${coin} feature coming soon!`);
 }
 
 showSection('deposit');
