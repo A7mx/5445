@@ -32,7 +32,7 @@
     <section class="balance-section">
       <div class="balance-card">
         <h2>Total Balance</h2>
-        <div id="balance-amount" class="balance-value">0.00 USDT</div>
+        <div id="balance-amount" class="balance-value">0.00 DIS</div>
         <p class="last-transaction">Last transaction: <span id="last-transaction">No transactions yet</span></p>
       </div>
       <div class="coin-list">
@@ -41,13 +41,13 @@
           <input type="text" id="coin-search" placeholder="Search a Coin" oninput="filterCoins('search', this.value)">
         </div>
         <ul id="coin-list">
-          <li class="coin-item" data-coin="usdt">
-            <img src="/images/usdt.png" alt="USDT" class="coin-icon">
-            <span class="coin-name">USDT</span>
-            <span id="usdt-balance" class="coin-balance">0.000000 USDT</span>
+          <li class="coin-item" data-coin="dis">
+            <img src="/images/dis.png" alt="DIS" class="coin-icon">
+            <span class="coin-name">DIS</span>
+            <span id="dis-balance" class="coin-balance">0.000000 DIS</span>
             <span class="coin-value">0.00 USD</span>
-            <span class="coin-change">-0.0035 (-0.03%)</span>
-            <button class="buy-btn" onclick="buyCoin('usdt')">Buy</button>
+            <span class="coin-change">+0.00 (0.00%)</span>
+            <button class="buy-btn" onclick="buyCoin('dis')">Buy</button>
           </li>
         </ul>
       </div>
@@ -57,29 +57,29 @@
         <h2>Deposit Funds</h2>
         <p>Your Wallet ID: <span id="wallet-id">Loading...</span></p>
         <img id="qr-code" src="https://via.placeholder.com/150" alt="QR Code for Deposit">
-        <input id="deposit-amount" type="number" placeholder="Amount to Deposit (USDT, min 6 USDT)" step="0.01">
+        <input id="deposit-amount" type="number" placeholder="Amount to Deposit (DIS, min 6 DIS)" step="0.01">
         <button onclick="depositFunds()">Deposit Now</button>
-        <p class="tip">Send USDT to the owner wallet address provided after clicking "Deposit Now". Minimum deposit is 6 USDT.</p>
+        <p class="tip">Send DIS to the owner wallet address provided after clicking "Deposit Now". Minimum deposit is 6 DIS.</p>
       </section>
       <section id="exchange" class="content-card">
         <h2>Exchange Funds</h2>
-        <p>Exchange feature coming soon!</p>
+        <p>Exchange DIS for other cryptocurrencies or fiat coming soon!</p>
       </section>
       <section id="transfer" class="content-card">
         <h2>Transfer Funds</h2>
         <input id="transfer-to-wallet" placeholder="Recipient Wallet ID">
-        <input id="transfer-amount" type="number" placeholder="Amount to Transfer (USDT)" step="0.01">
+        <input id="transfer-amount" type="number" placeholder="Amount to Transfer (DIS)" step="0.01">
         <button onclick="transferFunds()">Transfer Now</button>
-        <p class="tip">Transfer USDT to another user instantly using their wallet ID.</p>
+        <p class="tip">Transfer DIS to another user instantly using their wallet ID.</p>
       </section>
       <section id="withdraw" class="content-card">
         <h2>Withdraw Funds</h2>
-        <input id="withdraw-amount" type="number" placeholder="Amount to Withdraw (USDT, min 6 USDT)" step="0.01">
-        <input id="withdrawal-wallet" placeholder="Your TRC-20 USDT Wallet Address (e.g., TJfMChcqXQoWSpim2XzBjwH1s84BbwzZzZ)">
-        <p>5% Withdrawal Fee Will Apply (Fee Goes to Owner Wallet). Withdrawal processed manually—check status in History.</p>
+        <input id="withdraw-amount" type="number" placeholder="Amount to Withdraw (DIS, min 6 DIS)" step="0.01">
+        <input id="withdrawal-wallet" placeholder="Ethereum Address or PayPal Email (e.g., 0x... or user@paypal.com)">
+        <p>5% Withdrawal Fee Will Apply. Withdrawal processed manually—check status in History.</p>
         <button onclick="withdrawFunds()">Withdraw Now</button>
         <img id="withdraw-qr" src="https://via.placeholder.com/150" alt="QR Code for Withdrawal">
-        <p class="tip">Withdraw USDT to your wallet. Minimum withdrawal is 6 USDT. No external login required.</p>
+        <p class="tip">Withdraw DIS to your Ethereum wallet or PayPal account. Minimum withdrawal is 6 DIS. No external login required.</p>
       </section>
       <section id="friends" class="content-card">
         <h2>Friends</h2>
@@ -101,7 +101,7 @@
       </div>
       <div class="sidebar-section news">
         <h3>News</h3>
-        <p>Latest crypto updates: USDT market stable, Bitcoin reaches new highs!</p>
+        <p>Latest crypto updates: DIS market stable, Ethereum reaches new highs!</p>
       </div>
     </aside>
     <aside class="chat-panel hidden">
