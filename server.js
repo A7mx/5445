@@ -7,7 +7,7 @@ const bodyParser = require('body-parser');
 const path = require('path');
 const socketIo = require('socket.io');
 const http = require('http');
-const { RestClient } = require('bybit-api'); // Updated import for Bybit API
+const { RESTV5 } = require('bybit-api'); // Updated import for Bybit V5 API
 
 const requiredEnv = ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI', 'FIREBASE_API_KEY', 'BYBIT_API_KEY', 'BYBIT_API_SECRET'];
 requiredEnv.forEach(key => {
@@ -43,7 +43,7 @@ const io = socketIo(server);
 const oauth = new DiscordOAuth2();
 
 // Initialize Bybit API with your provided credentials
-const bybit = new RestClient({
+const bybit = new RESTV5({
     key: process.env.BYBIT_API_KEY,  // pPxTQty9kwgZCcoeMR
     secret: process.env.BYBIT_API_SECRET,  // gc93wnh5zpayfGcwmwHPXhpYcQ4sWW3PU9gT
     testnet: false, // Use mainnet for production
