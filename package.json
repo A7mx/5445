@@ -1,7 +1,7 @@
 {
   "name": "diswallet",
   "version": "1.0.0",
-  "description": "A Discord-integrated wallet app",
+  "description": "A Discord-integrated wallet app with DIS cryptocurrency",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -13,8 +13,8 @@
     "body-parser": "^1.20.2",
     "dotenv": "^16.4.5",
     "socket.io": "^4.7.5",
-    "tronweb": "^5.1.7",
-    "@noble/secp256k1": "^1.7.1"
+    "web3": "^4.0.0",
+    "ethers": "^6.0.0"
   },
   "engines": {
     "node": "22.x"
