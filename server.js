@@ -7,10 +7,10 @@ const bodyParser = require('body-parser');
 const path = require('path');
 const socketIo = require('socket.io');
 const http = require('http');
-const TronWeb = require('tronweb');
+const { ethers } = require('ethers');
 const axios = require('axios');
 
-const requiredEnv = ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI', 'FIREBASE_API_KEY', 'OWNER_USDT_WALLET', 'TRON_PRIVATE_KEY'];
+const requiredEnv = ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI', 'FIREBASE_API_KEY', 'OWNER_ETH_WALLET', 'ETH_PRIVATE_KEY'];
 requiredEnv.forEach(key => {
     if (!process.env[key]) {
         console.error(`Missing environment variable: ${key}`);
@@ -43,16 +43,16 @@ const server = http.createServer(app);
 const io = socketIo(server);
 const oauth = new DiscordOAuth2();
 
-// Initialize TronWeb for TRC-20 USDT with your provided private key
-let tronWeb;
+// Initialize Ethereum provider and wallet with your provided private key
+let provider, wallet;
 try {
-    tronWeb = new TronWeb({
-        fullHost: 'https://api.trongrid.io', // TronGrid public node (Mainnet)
-        privateKey: process.env.TRON_PRIVATE_KEY // Use your provided Tron private key (bb61755a69b23074c498a5f3206136daa3a757f45724ea4651321e2a264964d8)
-    });
-    console.log('TronWeb initialized successfully with private key on Tron Mainnet');
+    provider = new ethers.JsonRpcProvider('https://mainnet.infura.io/v3/YOUR_INFURA_PROJECT_ID'); // Replace with your Infura or Alchemy API key
+    wallet = new ethers.Wallet(process.env.ETH_PRIVATE_KEY, provider);
+    const ownerAddress = await wallet.getAddress();
+    process.env.OWNER_ETH_WALLET = ownerAddress; // Set or verify OWNER_ETH_WALLET
+    console.log('Ethereum wallet initialized successfully with address:', ownerAddress);
 } catch (error) {
-    console.error('Failed to initialize TronWeb:', error);
+    console.error('Failed to initialize Ethereum wallet:', error);
     process.exit(1);
 }
 
@@ -145,10 +145,10 @@ app.get('/auth/discord/callback', async (req, res) => {
                 username: user.username,
                 avatar: `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png`,
                 walletId: generateWalletId(),
-                balance: 0,  // USDT balance in Firestore (plain number)
+                balance: ethers.parseEther('0'),  // ETH balance in Firestore (in wei, but stored as string)
                 friends: [],
                 pendingFriends: [],
-                tronAddress: ''  // Optional: store user's Tron address
+                ethAddress: ''  // Optional: store user's Ethereum address
             });
             console.log('Step 3 completed: Created user:', user.username);
         } else {
@@ -191,19 +191,20 @@ app.post('/api/user', authenticateToken, async (req, res) => {
             const friendDoc = await getDoc(doc(db, 'users', friendId));
             return friendDoc.exists() ? { id: friendId, username: friendDoc.data().username, avatar: friendDoc.data().avatar, walletId: friendDoc.data().walletId } : null;
         }));
-        const usdtPrice = await getLiveUsdtPrice();
+        const ethPrice = await getLiveEthPrice();
+        const balanceInEth = ethers.formatEther(data.balance || '0'); // Convert balance from wei to ETH
         const response = {
             userId: userDoc.id,
             username: data.username,
             avatar: data.avatar,
             walletId: data.walletId,
-            balance: data.balance || 0,  // USDT balance
+            balance: balanceInEth,  // ETH balance in ETH (human-readable)
             friends: friendsData.filter(f => f),
             pendingFriends: pendingFriendsData.filter(f => f),
-            usdtPrice: usdtPrice.price, // Live USDT price in USD
-            priceTime: usdtPrice.timestamp // Timestamp of the price
+            ethPrice: ethPrice.price, // Live ETH price in USD
+            priceTime: ethPrice.timestamp // Timestamp of the price
         };
-        console.log('Sending user data with USDT price:', response);
+        console.log('Sending user data with ETH price:', response);
         res.json(response);
     } catch (error) {
         console.error('API user error:', error);
@@ -212,9 +213,9 @@ app.post('/api/user', authenticateToken, async (req, res) => {
 });
 
 app.get('/api/owner-wallet', (req, res) => {
-    const ownerWallet = process.env.OWNER_USDT_WALLET; // Use your Tron USDT wallet (TEq4NrK2Sov4fJetbcV577JvK5FkzhLVYw)
-    console.log('Returning owner wallet on Tron Mainnet:', ownerWallet);
-    res.json({ wallet: ownerWallet, qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${ownerWallet}`, network: 'Tron Mainnet' });
+    const ownerWallet = process.env.OWNER_ETH_WALLET; // Use your Ethereum wallet (derived from private key)
+    console.log('Returning owner wallet on Ethereum Mainnet:', ownerWallet);
+    res.json({ wallet: ownerWallet, qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${ownerWallet}`, network: 'Ethereum Mainnet' });
 });
 
 app.post('/api/pending-deposit', authenticateToken, async (req, res) => {
@@ -222,90 +223,102 @@ app.post('/api/pending-deposit', authenticateToken, async (req, res) => {
     try {
         await setDoc(doc(collection(db, 'deposits'), `${userId}_${Date.now()}`), {
             userId,
-            amount,
+            amount: ethers.parseEther(amount.toString()), // Store amount in wei
             timestamp,
             status,
-            network: 'Tron Mainnet'
+            network: 'Ethereum Mainnet'
         });
-        res.json({ success: true, message: 'Deposit request logged on Tron Mainnet' });
+        res.json({ success: true, message: 'Deposit request logged on Ethereum Mainnet' });
     } catch (error) {
-        console.error('Pending deposit error on Tron Mainnet:', error);
+        console.error('Pending deposit error on Ethereum Mainnet:', error);
         res.status(500).json({ error: 'Server error' });
     }
 });
 
-async function monitorUSDTDeposits() {
+async function monitorETHDeposits() {
     try {
-        // Monitor Tron blockchain for USDT (TRC-20) transactions to OWNER_USDT_WALLET on Tron Mainnet
-        const ownerAddress = process.env.OWNER_USDT_WALLET;
-        const transactions = await tronWeb.trx.getTransactionsToAddress(ownerAddress, 50); // Get last 50 transactions
+        // Monitor Ethereum blockchain for ETH transactions to OWNER_ETH_WALLET on Ethereum Mainnet
+        const ownerAddress = process.env.OWNER_ETH_WALLET;
+        const latestBlock = await provider.getBlockNumber();
+        const fromBlock = latestBlock - 1000; // Check last 1000 blocks for simplicity (adjust as needed)
+
+        const transactions = await provider.getLogs({
+            address: ownerAddress,
+            fromBlock,
+            toBlock: latestBlock,
+            topics: [ethers.id('transfer(address,address,uint256)')] // ETH transfer event (simplified)
+        });
 
         for (const tx of transactions) {
-            if (tx.contractData && tx.contractData.token_info && tx.contractData.token_info.name === 'USDT' && tx.contractData.amount) {
-                const amount = tx.contractData.amount / 1e6; // Convert TRC-20 USDT (6 decimals)
-                const txId = tx.txID;
-                const fromAddress = tx.contractData.owner_address;
-                const blockTimestamp = tx.block_timestamp ? new Date(tx.block_timestamp * 1000).toISOString() : new Date().toISOString();
+            const txReceipt = await provider.getTransactionReceipt(tx.transactionHash);
+            if (txReceipt && txReceipt.logs.length > 0) {
+                const log = txReceipt.logs[0];
+                const amount = BigInt(log.data); // Amount in wei
+                const amountInEth = ethers.formatEther(amount); // Convert to ETH
+
+                const txId = tx.transactionHash;
+                const fromAddress = '0x' + log.topics[1].slice(26); // Extract sender address (simplified)
 
                 // Find pending deposits in Firestore
                 const depositsQuery = query(collection(db, 'deposits'), where('status', '==', 'pending'));
                 const depositsSnap = await getDocs(depositsQuery);
                 for (const doc of depositsSnap.docs) {
                     const deposit = doc.data();
-                    if (deposit.amount === amount && deposit.userId) {
+                    if (ethers.formatEther(deposit.amount) === amountInEth && deposit.userId) {
                         const userDocRef = doc(db, 'users', deposit.userId);
                         const userDoc = await getDoc(userDocRef);
-                        const currentBalance = userDoc.data().balance || 0;
-                        await updateDoc(userDocRef, { balance: currentBalance + amount });
+                        const currentBalance = BigInt(userDoc.data().balance || '0');
+                        await updateDoc(userDocRef, { balance: (currentBalance + amount).toString() });
                         await updateDoc(doc.ref, { 
                             status: 'completed', 
                             txId, 
                             timestamp: serverTimestamp(), 
-                            network: 'Tron Mainnet',
+                            network: 'Ethereum Mainnet',
                             fromAddress 
                         });
+                        const ethPrice = await getLiveEthPrice();
                         io.to(deposit.userId).emit('transfer', { 
                             walletId: userDoc.data().walletId, 
-                            amount, 
+                            amount: amountInEth, 
                             type: 'deposit', 
-                            network: 'Tron Mainnet',
+                            network: 'Ethereum Mainnet',
                             txId,
-                            usdtPrice: await getLiveUsdtPrice().price, // Live USDT price
-                            priceTime: await getLiveUsdtPrice().timestamp // Price timestamp
+                            ethPrice: ethPrice.price,
+                            priceTime: ethPrice.timestamp
                         });
-                        console.log(`Deposit of ${amount} USDT credited to user ${deposit.userId} on Tron Mainnet, TX: ${txId}, USDT Price: $${await getLiveUsdtPrice().price} at ${await getLiveUsdtPrice().timestamp}`);
+                        console.log(`Deposit of ${amountInEth} ETH credited to user ${deposit.userId} on Ethereum Mainnet, TX: ${txId}, ETH Price: $${ethPrice.price} at ${ethPrice.timestamp}`);
                         break;
                     }
                 }
             }
         }
     } catch (error) {
-        console.error('Error monitoring USDT deposits on Tron Mainnet (suppressed from logs):', error);
-        if (error.response && error.response.status === 429) { // Rate limit handling for TronGrid
-            console.warn('Rate limit exceeded on TronGrid API, backing off...');
+        console.error('Error monitoring ETH deposits on Ethereum Mainnet (suppressed from logs):', error);
+        if (error.code === 'RATE_LIMIT_EXCEEDED') { // Handle Infura/Alchemy rate limits
+            console.warn('Rate limit exceeded on Ethereum API, backing off...');
             await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds before retrying
         }
     }
 }
 
-// Poll every 5 seconds for faster detection (removed WebSocket due to 404 errors)
-setInterval(monitorUSDTDeposits, 5000);
+// Poll every 5 seconds for faster detection
+setInterval(monitorETHDeposits, 5000);
 
-async function getLiveUsdtPrice() {
+async function getLiveEthPrice() {
     try {
-        const response = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=usd');
-        const price = response.data.tether.usd;
+        const response = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd');
+        const price = response.data.ethereum.usd;
         const timestamp = new Date().toISOString();
         return { price, timestamp };
     } catch (error) {
-        console.error('Error fetching live USDT price (suppressed from logs):', error);
-        return { price: 1.00, timestamp: new Date().toISOString() }; // Default to $1.00 if API fails
+        console.error('Error fetching live ETH price (suppressed from logs):', error);
+        return { price: 3000.00, timestamp: new Date().toISOString() }; // Default to $3000.00 if API fails (approximate ETH value)
     }
 }
 
 app.post('/api/deposit', authenticateToken, async (req, res) => {
     const { amount, walletId, verificationCode } = req.body;
-    if (!amount || amount <= 0 || !walletId || amount < 6) return res.status(400).json({ error: 'Invalid deposit amount (minimum 6 USDT)' });
+    if (!amount || amount <= 0 || amount < 0.01) return res.status(400).json({ error: 'Invalid deposit amount (minimum 0.01 ETH)' });
     try {
         // Verify 2FA (simplified, integrate with Firebase Auth or TOTP)
         const userDoc = await getDoc(doc(db, 'users', req.user.userId));
@@ -314,24 +327,24 @@ app.post('/api/deposit', authenticateToken, async (req, res) => {
         }
         // Add actual 2FA verification logic here
 
-        // Log pending deposit to OWNER_USDT_WALLET on Tron Mainnet
+        // Log pending deposit to OWNER_ETH_WALLET on Ethereum Mainnet
         await setDoc(doc(collection(db, 'deposits'), `${req.user.userId}_${Date.now()}`), {
             userId: req.user.userId,
-            amount,
+            amount: ethers.parseEther(amount.toString()), // Store amount in wei
             timestamp: new Date().toISOString(),
             status: 'pending',
-            network: 'Tron Mainnet'
+            network: 'Ethereum Mainnet'
         });
-        const usdtPrice = await getLiveUsdtPrice();
+        const ethPrice = await getLiveEthPrice();
         res.json({ 
             success: true, 
-            message: `Deposit of ${amount} USDT requested on Tron Mainnet. Please send to wallet: ${process.env.OWNER_USDT_WALLET} and await confirmation. Current USDT Price: $${usdtPrice.price} at ${usdtPrice.timestamp}.`, 
-            network: 'Tron Mainnet',
-            usdtPrice: usdtPrice.price,
-            priceTime: usdtPrice.timestamp 
+            message: `Deposit of ${amount} ETH requested on Ethereum Mainnet. Please send to wallet: ${process.env.OWNER_ETH_WALLET} and await confirmation. Current ETH Price: $${ethPrice.price} at ${ethPrice.timestamp}.`, 
+            network: 'Ethereum Mainnet',
+            ethPrice: ethPrice.price,
+            priceTime: ethPrice.timestamp 
         });
     } catch (error) {
-        console.error('Deposit error on Tron Mainnet (suppressed from logs):', error);
+        console.error('Deposit error on Ethereum Mainnet (suppressed from logs):', error);
         res.status(500).json({ error: 'Deposit error' });
     }
 });
@@ -342,8 +355,9 @@ app.post('/api/transfer', authenticateToken, async (req, res) => {
     try {
         const senderDocRef = doc(db, 'users', req.user.userId);
         const senderDoc = await getDoc(senderDocRef);
-        const senderBalance = senderDoc.data().balance || 0;
-        if (senderBalance < amount) return res.status(400).json({ error: 'Insufficient balance' });
+        const senderBalance = BigInt(senderDoc.data().balance || '0');
+        const amountInWei = ethers.parseEther(amount.toString());
+        if (senderBalance < amountInWei) return res.status(400).json({ error: 'Insufficient balance' });
 
         const receiverQuery = query(collection(db, 'users'), where('walletId', '==', toWalletId));
         const receiverSnap = await getDocs(receiverQuery);
@@ -351,144 +365,151 @@ app.post('/api/transfer', authenticateToken, async (req, res) => {
 
         const receiverDocRef = receiverSnap.docs[0].ref;
         const receiverDoc = receiverSnap.docs[0];
-        const receiverBalance = receiverDoc.data().balance || 0;
+        const receiverBalance = BigInt(receiverDoc.data().balance || '0');
 
-        const newSenderBalance = senderBalance - amount;
-        const newReceiverBalance = receiverBalance + amount;
+        const newSenderBalance = (senderBalance - amountInWei).toString();
+        const newReceiverBalance = (receiverBalance + amountInWei).toString();
 
         await updateDoc(senderDocRef, { balance: newSenderBalance });
         await updateDoc(receiverDocRef, { balance: newReceiverBalance });
 
-        // Perform on-chain transfer using TronWeb on Tron Mainnet
-        const senderAddress = tronWeb.address.fromPrivateKey(process.env.TRON_PRIVATE_KEY);
-        const receiverAddress = await getTronAddressFromWalletId(toWalletId);
-        const tx = await tronWeb.trx.sendTrx(receiverAddress, tronWeb.toSun(amount * 1e6), { from: senderAddress }); // Adjust for TRC-20 USDT if needed
+        // Perform on-chain transfer using Ethereum wallet on Ethereum Mainnet
+        const receiverAddress = await getEthAddressFromWalletId(toWalletId);
+        const tx = await wallet.sendTransaction({
+            to: receiverAddress,
+            value: amountInWei
+        });
 
-        const usdtPrice = await getLiveUsdtPrice();
+        const ethPrice = await getLiveEthPrice();
         io.to(req.user.userId).emit('transfer', { 
             fromWalletId: senderDoc.data().walletId, 
             toWalletId, 
             amount, 
             type: 'peer', 
-            network: 'Tron Mainnet',
-            txId: tx.txid || null,
-            usdtPrice: usdtPrice.price,
-            priceTime: usdtPrice.timestamp
+            network: 'Ethereum Mainnet',
+            txId: tx.hash,
+            ethPrice: ethPrice.price,
+            priceTime: ethPrice.timestamp
         });
         io.to(receiverDoc.id).emit('transfer', { 
             fromWalletId: senderDoc.data().walletId, 
             toWalletId, 
             amount, 
             type: 'peer', 
-            network: 'Tron Mainnet',
-            txId: tx.txid || null,
-            usdtPrice: usdtPrice.price,
-            priceTime: usdtPrice.timestamp
+            network: 'Ethereum Mainnet',
+            txId: tx.hash,
+            ethPrice: ethPrice.price,
+            priceTime: ethPrice.timestamp
         });
 
         res.json({ 
             success: true, 
-            message: `Transferred ${amount} USDT to ${toWalletId} on Tron Mainnet. TX: ${tx.txid || 'Pending'}, USDT Price: $${usdtPrice.price} at ${usdtPrice.timestamp}.`, 
-            network: 'Tron Mainnet',
-            usdtPrice: usdtPrice.price,
-            priceTime: usdtPrice.timestamp 
+            message: `Transferred ${amount} ETH to ${toWalletId} on Ethereum Mainnet. TX: ${tx.hash}, ETH Price: $${ethPrice.price} at ${ethPrice.timestamp}.`, 
+            network: 'Ethereum Mainnet',
+            ethPrice: ethPrice.price,
+            priceTime: ethPrice.timestamp 
         });
     } catch (error) {
-        console.error('Transfer error on Tron Mainnet (suppressed from logs):', error);
+        console.error('Transfer error on Ethereum Mainnet (suppressed from logs):', error);
         res.status(500).json({ error: 'Transfer error' });
     }
 });
 
-// Helper function to map DISWallet walletId to Tron address
-async function getTronAddressFromWalletId(walletId) {
+// Helper function to map DISWallet walletId to Ethereum address
+async function getEthAddressFromWalletId(walletId) {
     const usersQuery = query(collection(db, 'users'), where('walletId', '==', walletId));
     const usersSnap = await getDocs(usersQuery);
     if (!usersSnap.empty) {
         const userDoc = usersSnap.docs[0];
-        return userDoc.data().tronAddress || process.env.OWNER_USDT_WALLET; // Default to owner wallet or fetch actual address
+        return userDoc.data().ethAddress || process.env.OWNER_ETH_WALLET; // Default to owner wallet or fetch actual address
     }
     throw new Error('Wallet ID not found');
 }
 
 app.post('/api/withdraw', authenticateToken, async (req, res) => {
-    const { amount, withdrawalWalletId } = req.body; // withdrawalWalletId can be Tron address or PayPal email
-    if (!amount || amount <= 0 || !withdrawalWalletId || amount < 6) return res.status(400).json({ error: 'Invalid withdrawal request (minimum 6 USDT)' });
+    const { amount, withdrawalWalletId } = req.body; // withdrawalWalletId can be Ethereum address or PayPal email
+    if (!amount || amount <= 0 || !withdrawalWalletId || amount < 0.01) return res.status(400).json({ error: 'Invalid withdrawal request (minimum 0.01 ETH)' });
     try {
         const userDocRef = doc(db, 'users', req.user.userId);
         const userDoc = await getDoc(userDocRef);
-        const currentBalance = userDoc.data().balance || 0;
-        if (currentBalance < amount) return res.status(400).json({ error: 'Insufficient balance' });
+        const currentBalance = BigInt(userDoc.data().balance || '0');
+        const amountInWei = ethers.parseEther(amount.toString());
+        if (currentBalance < amountInWei) return res.status(400).json({ error: 'Insufficient balance' });
 
-        const fee = amount * 0.04; // 4% fee as requested
-        const amountAfterFee = amount - fee;
-        const newBalance = currentBalance - amount;
+        const fee = ethers.parseEther((amount * 0.04).toString()); // 4% fee in ETH
+        const amountAfterFee = amountInWei - fee;
+        const newBalance = (currentBalance - amountInWei).toString();
 
         await updateDoc(userDocRef, { balance: newBalance });
 
-        // Handle withdrawal based on destination type on Tron Mainnet
-        if (withdrawalWalletId.startsWith('T') || withdrawalWalletId.startsWith('41')) { // Tron address
-            const senderAddress = tronWeb.address.fromPrivateKey(process.env.TRON_PRIVATE_KEY);
-            const tx = await tronWeb.trx.sendTrx(withdrawalWalletId, tronWeb.toSun(amountAfterFee * 1e6), { from: senderAddress }); // Adjust for TRC-20 USDT if needed
-            const usdtPrice = await getLiveUsdtPrice();
+        // Handle withdrawal based on destination type on Ethereum Mainnet
+        if (ethers.isAddress(withdrawalWalletId)) { // Ethereum address
+            const tx = await wallet.sendTransaction({
+                to: withdrawalWalletId,
+                value: amountAfterFee
+            });
+            const ethPrice = await getLiveEthPrice();
             await setDoc(doc(collection(db, 'transactions')), {
                 fromWalletId: userDoc.data().walletId,
                 toWalletId: withdrawalWalletId,
-                amount: amountAfterFee,
-                fee,
+                amount: ethers.formatEther(amountAfterFee),
+                fee: ethers.formatEther(fee),
                 type: 'withdrawal',
                 timestamp: serverTimestamp(),
                 userId: req.user.userId,
-                network: 'Tron Mainnet',
-                txId: tx.txid || null,
-                usdtPrice: usdtPrice.price,
-                priceTime: usdtPrice.timestamp
+                network: 'Ethereum Mainnet',
+                txId: tx.hash,
+                ethPrice: ethPrice.price,
+                priceTime: ethPrice.timestamp
             });
             res.json({ 
                 success: true, 
-                message: `Withdrawal of ${amountAfterFee} USDT (after 4% fee) to Tron address ${withdrawalWalletId} on Tron Mainnet requested. Transaction ID: ${tx.txid || 'Pending'}, USDT Price: $${usdtPrice.price} at ${usdtPrice.timestamp}.`, 
+                message: `Withdrawal of ${ethers.formatEther(amountAfterFee)} ETH (after 4% fee) to Ethereum address ${withdrawalWalletId} on Ethereum Mainnet requested. Transaction ID: ${tx.hash}, ETH Price: $${ethPrice.price} at ${ethPrice.timestamp}.`, 
                 qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${withdrawalWalletId}`, 
-                network: 'Tron Mainnet',
-                usdtPrice: usdtPrice.price,
-                priceTime: usdtPrice.timestamp 
+                network: 'Ethereum Mainnet',
+                ethPrice: ethPrice.price,
+                priceTime: ethPrice.timestamp 
             });
         } else if (withdrawalWalletId.includes('@') || withdrawalWalletId.includes('.com')) { // PayPal email
-            await handlePayPalWithdrawal(req.user.userId, amountAfterFee, withdrawalWalletId);
-            const usdtPrice = await getLiveUsdtPrice();
+            await handlePayPalWithdrawal(req.user.userId, ethers.formatEther(amountAfterFee), withdrawalWalletId);
+            const ethPrice = await getLiveEthPrice();
             await setDoc(doc(collection(db, 'transactions')), {
                 fromWalletId: userDoc.data().walletId,
                 toWalletId: withdrawalWalletId,
-                amount: amountAfterFee,
-                fee,
+                amount: ethers.formatEther(amountAfterFee),
+                fee: ethers.formatEther(fee),
                 type: 'withdrawal',
                 timestamp: serverTimestamp(),
                 userId: req.user.userId,
-                network: 'Tron Mainnet',
+                network: 'Ethereum Mainnet',
                 txId: null,
-                usdtPrice: usdtPrice.price,
-                priceTime: usdtPrice.timestamp
+                ethPrice: ethPrice.price,
+                priceTime: ethPrice.timestamp
             });
             res.json({ 
                 success: true, 
-                message: `Withdrawal of ${amountAfterFee} USDT (after 4% fee) to PayPal ${withdrawalWalletId} on Tron Mainnet requested. Please check your PayPal account for confirmation. USDT Price: $${usdtPrice.price} at ${usdtPrice.timestamp}.`, 
-                network: 'Tron Mainnet',
-                usdtPrice: usdtPrice.price,
-                priceTime: usdtPrice.timestamp 
+                message: `Withdrawal of ${ethers.formatEther(amountAfterFee)} ETH (after 4% fee) to PayPal ${withdrawalWalletId} on Ethereum Mainnet requested. Please check your PayPal account for confirmation. ETH Price: $${ethPrice.price} at ${ethPrice.timestamp}.`, 
+                network: 'Ethereum Mainnet',
+                ethPrice: ethPrice.price,
+                priceTime: ethPrice.timestamp 
             });
         } else {
-            return res.status(400).json({ error: 'Invalid withdrawal destination (use Tron address or PayPal email)' });
+            return res.status(400).json({ error: 'Invalid withdrawal destination (use Ethereum address or PayPal email)' });
         }
     } catch (error) {
-        console.error('Withdrawal error on Tron Mainnet (suppressed from logs):', error);
+        console.error('Withdrawal error on Ethereum Mainnet (suppressed from logs):', error);
         res.status(500).json({ error: 'Withdrawal error' });
     }
 });
 
 // Helper function for PayPal withdrawal (simplified, requires PayPal API integration)
 async function handlePayPalWithdrawal(userId, amount, paypalEmail) {
-    // Use PayPal API to convert USDT to USD and transfer to PayPal (requires PayPal Developer account and API keys)
-    console.log(`Simulating PayPal withdrawal of ${amount} USDT to ${paypalEmail} for user ${userId} via Tron Mainnet`);
+    // Use PayPal API to convert ETH to USD and transfer to PayPal (requires PayPal Developer account and API keys)
+    const ethPrice = await getLiveEthPrice();
+    const usdAmount = amount * ethPrice.price;
+    console.log(`Simulating PayPal withdrawal of ${amount} ETH (${usdAmount} USD) to ${paypalEmail} for user ${userId} via Ethereum Mainnet`);
     // Placeholder: Implement actual PayPal API call here (e.g., using paypal-rest-sdk or paypal-checkout)
-    // Note: Convert USDT to USD via an exchange before transferring to PayPal
+    // Note: Convert ETH to USD via an exchange before transferring to PayPal
 }
 
 app.post('/api/add-friend', authenticateToken, async (req, res) => {
@@ -503,9 +524,9 @@ app.post('/api/add-friend', authenticateToken, async (req, res) => {
         await updateDoc(userDocRef, { friends: arrayUnion(friendId) });
         await updateDoc(friendDocRef, { pendingFriends: arrayUnion(req.user.userId) });
 
-        res.json({ success: true, message: `Friend request sent to ${friendDoc.data().username} on Tron Mainnet` });
+        res.json({ success: true, message: `Friend request sent to ${friendDoc.data().username} on Ethereum Mainnet` });
     } catch (error) {
-        console.error('Add friend error on Tron Mainnet (suppressed from logs):', error);
+        console.error('Add friend error on Ethereum Mainnet (suppressed from logs):', error);
         res.status(500).json({ error: 'Server error' });
     }
 });
@@ -518,9 +539,9 @@ app.post('/api/accept-friend', authenticateToken, async (req, res) => {
             friends: arrayUnion(friendId),
             pendingFriends: arrayRemove(friendId)
         });
-        res.json({ success: true, message: 'Friend request accepted on Tron Mainnet' });
+        res.json({ success: true, message: 'Friend request accepted on Ethereum Mainnet' });
     } catch (error) {
-        console.error('Accept friend error on Tron Mainnet (suppressed from logs):', error);
+        console.error('Accept friend error on Ethereum Mainnet (suppressed from logs):', error);
         res.status(500).json({ error: 'Server error' });
     }
 });
@@ -530,15 +551,15 @@ app.post('/api/ignore-friend', authenticateToken, async (req, res) => {
     try {
         const userDocRef = doc(db, 'users', req.user.userId);
         await updateDoc(userDocRef, { pendingFriends: arrayRemove(friendId) });
-        res.json({ success: true, message: 'Friend request ignored on Tron Mainnet' });
+        res.json({ success: true, message: 'Friend request ignored on Ethereum Mainnet' });
     } catch (error) {
-        console.error('Ignore friend error on Tron Mainnet (suppressed from logs):', error);
+        console.error('Ignore friend error on Ethereum Mainnet (suppressed from logs):', error);
         res.status(500).json({ error: 'Server error' });
     }
 });
 
 app.get('/api/chat/:friendId', authenticateToken, async (req, res) => {
-    res.json({ success: true, messages: [], network: 'Tron Mainnet' }); // Placeholder
+    res.json({ success: true, messages: [], network: 'Ethereum Mainnet' }); // Placeholder
 });
 
 app.post('/api/transactions', authenticateToken, async (req, res) => {
@@ -547,33 +568,33 @@ app.post('/api/transactions', authenticateToken, async (req, res) => {
         const q = query(collection(db, 'transactions'), where('fromWalletId', '==', userDoc.data().walletId));
         const snap = await getDocs(q);
         const transactions = snap.docs.map(doc => doc.data());
-        const usdtPrice = await getLiveUsdtPrice();
+        const ethPrice = await getLiveEthPrice();
         res.json({ 
             success: true, 
             transactions, 
-            network: 'Tron Mainnet',
-            usdtPrice: usdtPrice.price, // Live USDT price in USD
-            priceTime: usdtPrice.timestamp // Timestamp of the price
+            network: 'Ethereum Mainnet',
+            ethPrice: ethPrice.price, // Live ETH price in USD
+            priceTime: ethPrice.timestamp // Timestamp of the price
         });
     } catch (error) {
-        console.error('Transactions error on Tron Mainnet (suppressed from logs):', error);
+        console.error('Transactions error on Ethereum Mainnet (suppressed from logs):', error);
         res.status(500).json({ error: 'Server error' });
     }
 });
 
-app.get('/api/usdt-price', async (req, res) => {
+app.get('/api/eth-price', async (req, res) => {
     try {
-        const usdtPrice = await getLiveUsdtPrice();
+        const ethPrice = await getLiveEthPrice();
         res.json({ 
-            price: usdtPrice.price, 
-            timestamp: usdtPrice.timestamp, 
-            network: 'Tron Mainnet' 
+            price: ethPrice.price, 
+            timestamp: ethPrice.timestamp, 
+            network: 'Ethereum Mainnet' 
         });
     } catch (error) {
-        console.error('Error fetching USDT price on Tron Mainnet (suppressed from logs):', error);
-        res.status(500).json({ error: 'Failed to fetch USDT price' });
+        console.error('Error fetching ETH price on Ethereum Mainnet (suppressed from logs):', error);
+        res.status(500).json({ error: 'Failed to fetch ETH price' });
     }
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Server running on http://localhost:${PORT} on Tron Mainnet`));
+server.listen(PORT, () => console.log(`Server running on http://localhost:${PORT} on Ethereum Mainnet`));
