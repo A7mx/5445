@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "A Discord-integrated wallet app with DIS (Ethereum, ETH) on Ethereum Mainnet",
   "main": "server.js",
-  "type": "commonjs",  // Explicitly set to CommonJS to use require
+  "type": "commonjs",  
   "scripts": {
     "start": "node server.js"
   },
