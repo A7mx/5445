@@ -231,10 +231,11 @@ app.post('/api/pending-deposit', authenticateToken, async (req, res) => {
 
 async function monitorUSDTDeposits() {
     try {
-        // Monitor Tron blockchain for USDT (TRC-20) transactions to OWNER_USDT_WALLET every 5 seconds
-        const transactions = await tronWeb.trx.getTransactionsToAddress(process.env.OWNER_USDT_WALLET, 50); // Get last 50 transactions
+        // Monitor Tron blockchain for USDT (TRC-20) transactions to OWNER_USDT_WALLET using the correct TronWeb method
+        const ownerAddress = process.env.OWNER_USDT_WALLET;
+        const transactions = await tronWeb.trx.getTransactionsToAddress(ownerAddress, 50); // Get last 50 transactions
         for (const tx of transactions) {
-            if (tx.contractData && tx.contractData.token_name === 'USDT' && tx.contractData.amount) {
+            if (tx.contractData && tx.contractData.token_info && tx.contractData.token_info.name === 'USDT' && tx.contractData.amount) {
                 const amount = tx.contractData.amount / 1e6; // Convert TRC-20 USDT (6 decimals)
                 const txId = tx.txID;
                 const fromAddress = tx.contractData.owner_address;
@@ -279,7 +280,7 @@ app.post('/api/deposit', authenticateToken, async (req, res) => {
         }
         // Add actual 2FA verification logic here
 
-        // Log pending deposit
+        // Log pending deposit to OWNER_USDT_WALLET
         await setDoc(doc(collection(db, 'deposits'), `${req.user.userId}_${Date.now()}`), {
             userId: req.user.userId,
             amount,
@@ -351,7 +352,7 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
         const currentBalance = userDoc.data().balance || 0;
         if (currentBalance < amount) return res.status(400).json({ error: 'Insufficient balance' });
 
-        const fee = amount * 0.05; // 5% fee
+        const fee = amount * 0.04; // Updated to 4% fee as requested
         const amountAfterFee = amount - fee;
         const newBalance = currentBalance - amount;
 
@@ -370,7 +371,7 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
                 timestamp: serverTimestamp(),
                 userId: req.user.userId
             });
-            res.json({ success: true, message: `Withdrawal of ${amountAfterFee} USDT (after 5% fee) to Tron address ${withdrawalWalletId} requested. Transaction processed on blockchain.`, qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${withdrawalWalletId}` });
+            res.json({ success: true, message: `Withdrawal of ${amountAfterFee} USDT (after 4% fee) to Tron address ${withdrawalWalletId} requested. Transaction processed on blockchain.`, qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${withdrawalWalletId}` });
         } else if (withdrawalWalletId.includes('@') || withdrawalWalletId.includes('.com')) { // PayPal email
             await handlePayPalWithdrawal(req.user.userId, amountAfterFee, withdrawalWalletId);
             await setDoc(doc(collection(db, 'transactions')), {
@@ -382,7 +383,7 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
                 timestamp: serverTimestamp(),
                 userId: req.user.userId
             });
-            res.json({ success: true, message: `Withdrawal of ${amountAfterFee} USDT (after 5% fee) to PayPal ${withdrawalWalletId} requested. Please check your PayPal account for confirmation.` });
+            res.json({ success: true, message: `Withdrawal of ${amountAfterFee} USDT (after 4% fee) to PayPal ${withdrawalWalletId} requested. Please check your PayPal account for confirmation.` });
         } else {
             return res.status(400).json({ error: 'Invalid withdrawal destination (use Tron address or PayPal email)' });
         }
