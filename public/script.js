@@ -45,7 +45,7 @@ async function refreshUserData() {
       username: data.username,
       avatar: data.avatar,
       walletId: data.walletId,
-      balance: typeof data.balance === 'number' ? data.balance : 0, // Ensure balance is a number
+      balance: typeof data.balance === 'number' ? data.balance : 0,
       friends: data.friends || [],
       pendingFriends: data.pendingFriends || []
     };
@@ -64,14 +64,22 @@ async function refreshUserData() {
 
 function updateUI() {
   const avatarEl = document.getElementById('avatar');
-  const avatarUrl = userData.avatar ? `${userData.avatar}` : 'https://via.placeholder.com/40';
-  console.log('Setting avatar URL:', avatarUrl);
-  avatarEl.src = ''; // Clear previous src to force reload
+  const avatarUrl = userData.avatar ? `${userData.avatar}?t=${Date.now()}` : 'https://via.placeholder.com/40'; // Cache-busting with timestamp
+  console.log('Attempting to set avatar URL:', avatarUrl);
+
+  // Reset avatar to force reload
+  avatarEl.removeAttribute('src');
   avatarEl.src = avatarUrl;
-  avatarEl.onload = () => console.log('Avatar loaded successfully:', avatarUrl);
+
+  // Detailed event listeners for debugging
+  avatarEl.onload = () => {
+    console.log('Avatar loaded successfully:', avatarEl.src);
+    avatarEl.style.opacity = 1; // Ensure visibility
+  };
   avatarEl.onerror = () => {
-    console.warn('Avatar failed to load:', avatarUrl, 'Switching to fallback');
+    console.warn('Avatar failed to load:', avatarUrl);
     avatarEl.src = 'https://via.placeholder.com/40';
+    console.log('Switched to fallback avatar:', avatarEl.src);
   };
 
   const usernameEl = document.getElementById('username');
@@ -91,6 +99,7 @@ function updateUI() {
   console.log('Setting wallet ID:', userData.walletId);
   walletIdEl.textContent = userData.walletId || 'N/A';
 
+  // Final verification
   console.log('UI Updated - Avatar:', avatarEl.src, 'Username:', usernameEl.textContent, 'Balance:', balanceEl.textContent);
 }
 
