@@ -7,12 +7,36 @@ const bodyParser = require('body-parser');
 const path = require('path');
 const socketIo = require('socket.io');
 const http = require('http');
+const crypto = require('crypto');
 
-const requiredEnv = ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI', 'FIREBASE_API_KEY'];
+// Validate environment variables
+const requiredEnv = ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI', 'FIREBASE_API_KEY', 'ENCRYPTION_KEY'];
 requiredEnv.forEach(key => {
     if (!process.env[key]) throw new Error(`Missing env var: ${key}`);
 });
 
+// Encryption setup
+const ENCRYPTION_KEY = Buffer.from(process.env.ENCRYPTION_KEY, 'hex'); // 32 bytes key from .env
+const IV_LENGTH = 16;
+
+function encrypt(text) {
+    const iv = crypto.randomBytes(IV_LENGTH);
+    const cipher = crypto.createCipheriv('aes-256-cbc', ENCRYPTION_KEY, iv);
+    let encrypted = cipher.update(text.toString(), 'utf8', 'hex');
+    encrypted += cipher.final('hex');
+    return iv.toString('hex') + ':' + encrypted;
+}
+
+function decrypt(text) {
+    const [ivHex, encryptedHex] = text.split(':');
+    const iv = Buffer.from(ivHex, 'hex');
+    const decipher = crypto.createDecipheriv('aes-256-cbc', ENCRYPTION_KEY, iv);
+    let decrypted = decipher.update(encryptedHex, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    return decrypted;
+}
+
+// Initialize Firebase
 const firebaseConfig = {
     apiKey: process.env.FIREBASE_API_KEY,
     authDomain: process.env.FIREBASE_AUTH_DOMAIN,
@@ -26,6 +50,7 @@ const firebaseConfig = {
 const appFirebase = initializeApp(firebaseConfig);
 const db = getFirestore(appFirebase);
 
+// Initialize Express and Socket.io
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server);
@@ -35,27 +60,20 @@ app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 function generateToken() {
-    return require('crypto').randomBytes(16).toString('hex');
+    return crypto.randomBytes(16).toString('hex');
 }
 
 function generateWalletId() {
-    return `WAL-${require('crypto').randomBytes(6).toString('hex').toUpperCase()}`;
+    return `WAL-${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
 }
 
 async function authenticateToken(req, res, next) {
     const token = req.headers['authorization']?.split(' ')[1];
-    if (!token) {
-        console.log('No token provided');
-        return res.status(401).json({ error: 'Unauthorized' });
-    }
+    if (!token) return res.status(401).json({ error: 'Unauthorized' });
     try {
         const sessionDoc = await getDoc(doc(db, 'sessions', token));
-        if (!sessionDoc.exists()) {
-            console.log('Invalid token:', token);
-            return res.status(403).json({ error: 'Invalid token' });
-        }
+        if (!sessionDoc.exists()) return res.status(403).json({ error: 'Invalid token' });
         req.user = { userId: sessionDoc.data().userId };
-        console.log('Authenticated user:', req.user.userId);
         next();
     } catch (error) {
         console.error('Auth error:', error);
@@ -63,6 +81,7 @@ async function authenticateToken(req, res, next) {
     }
 }
 
+// Routes
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 app.get('/auth/discord', (req, res) => {
@@ -71,13 +90,11 @@ app.get('/auth/discord', (req, res) => {
         scope: ['identify', 'email'],
         redirectUri: process.env.DISCORD_REDIRECT_URI,
     });
-    console.log('Redirecting to Discord:', url);
     res.redirect(url);
 });
 
 app.get('/auth/discord/callback', async (req, res) => {
     const { code } = req.query;
-    console.log('OAuth callback with code:', code);
     try {
         const tokenData = await oauth.tokenRequest({
             clientId: process.env.DISCORD_CLIENT_ID,
@@ -89,8 +106,6 @@ app.get('/auth/discord/callback', async (req, res) => {
         });
 
         const user = await oauth.getUser(tokenData.access_token);
-        console.log('Discord user:', user);
-
         const userDocRef = doc(db, 'users', user.id);
         const userDoc = await getDoc(userDocRef);
         if (!userDoc.exists()) {
@@ -98,17 +113,10 @@ app.get('/auth/discord/callback', async (req, res) => {
                 username: user.username,
                 avatar: `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png`,
                 walletId: generateWalletId(),
-                balance: 0, // Ensure numeric balance
+                balance: encrypt('0'), // Encrypted balance
                 friends: [],
                 pendingFriends: []
             });
-            console.log('Created user:', user.username);
-        } else {
-            const data = userDoc.data();
-            if (typeof data.balance !== 'number') {
-                await updateDoc(userDocRef, { balance: 0 });
-                console.log('Fixed balance for user:', user.username);
-            }
         }
 
         const sessionToken = generateToken();
@@ -116,7 +124,6 @@ app.get('/auth/discord/callback', async (req, res) => {
             userId: user.id,
             createdAt: serverTimestamp()
         });
-        console.log('Session token:', sessionToken);
 
         res.redirect(`/dashboard.html?token=${sessionToken}`);
     } catch (error) {
@@ -143,7 +150,7 @@ app.post('/api/user', authenticateToken, async (req, res) => {
             username: data.username,
             avatar: data.avatar,
             walletId: data.walletId,
-            balance: typeof data.balance === 'number' ? data.balance : 0,
+            balance: parseFloat(decrypt(data.balance)),
             friends: friendsData.filter(f => f),
             pendingFriends: pendingFriendsData.filter(f => f)
         };
@@ -155,20 +162,82 @@ app.post('/api/user', authenticateToken, async (req, res) => {
     }
 });
 
-app.post('/api/wallet-id', authenticateToken, async (req, res) => {
+app.get('/api/owner-wallet', (req, res) => {
+    // Your USDT wallet address (e.g., TRC-20 or ERC-20)
+    const ownerWallet = 'YOUR_USDT_WALLET_ADDRESS_HERE'; // Replace with your actual USDT wallet
+    res.json({ wallet: ownerWallet, qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${ownerWallet}` });
+});
+
+app.post('/api/deposit', authenticateToken, async (req, res) => {
+    const { amount, walletId } = req.body;
+    if (!amount || amount <= 0 || walletId !== userData.walletId) return res.status(400).json({ error: 'Invalid deposit request' });
     try {
-        const userDoc = await getDoc(doc(db, 'users', req.user.userId));
-        if (!userDoc.exists()) return res.status(404).json({ error: 'User not found' });
-        res.json({ qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${userDoc.data().walletId}` });
+        const userDocRef = doc(db, 'users', req.user.userId);
+        const userDoc = await getDoc(userDocRef);
+        const currentBalance = parseFloat(decrypt(userDoc.data().balance));
+        const newBalance = currentBalance + amount;
+        await updateDoc(userDocRef, { balance: encrypt(newBalance.toString()) });
+        res.json({ success: true, message: `Deposit of ${amount} USDT requested. Please send to owner wallet and await confirmation.` });
     } catch (error) {
-        res.status(500).json({ error: 'Server error' });
+        res.status(500).json({ error: 'Deposit error' });
     }
 });
 
-// Placeholder endpoints
-app.post('/api/deposit', authenticateToken, (req, res) => res.json({ success: true, message: 'Deposit initiated (placeholder)' }));
-app.post('/api/transfer', authenticateToken, (req, res) => res.json({ success: true, message: 'Transfer initiated (placeholder)' }));
-app.post('/api/withdraw', authenticateToken, (req, res) => res.json({ success: true, message: 'Withdrawal initiated (placeholder)', qrCode: 'https://via.placeholder.com/150' }));
+app.post('/api/withdraw', authenticateToken, async (req, res) => {
+    const { amount, withdrawalWalletId } = req.body;
+    if (!amount || amount <= 0 || !withdrawalWalletId) return res.status(400).json({ error: 'Invalid withdrawal request' });
+    try {
+        const userDocRef = doc(db, 'users', req.user.userId);
+        const userDoc = await getDoc(userDocRef);
+        const currentBalance = parseFloat(decrypt(userDoc.data().balance));
+        if (currentBalance < amount) return res.status(400).json({ error: 'Insufficient balance' });
+        const newBalance = currentBalance - amount;
+        await updateDoc(userDocRef, { balance: encrypt(newBalance.toString()) });
+        // Here you’d typically initiate a USDT transfer to withdrawalWalletId (manual or via API)
+        res.json({ success: true, message: `Withdrawal of ${amount} USDT to ${withdrawalWalletId} requested. Processing soon.` });
+    } catch (error) {
+        res.status(500).json({ error: 'Withdrawal error' });
+    }
+});
+
+app.post('/api/transfer', authenticateToken, async (req, res) => {
+    const { toWalletId, amount } = req.body;
+    if (!toWalletId || !amount || amount <= 0) return res.status(400).json({ error: 'Invalid transfer request' });
+    try {
+        const senderDocRef = doc(db, 'users', req.user.userId);
+        const senderDoc = await getDoc(senderDocRef);
+        const senderBalance = parseFloat(decrypt(senderDoc.data().balance));
+        if (senderBalance < amount) return res.status(400).json({ error: 'Insufficient balance' });
+
+        const receiverQuery = query(collection(db, 'users'), where('walletId', '==', toWalletId));
+        const receiverSnap = await getDocs(receiverQuery);
+        if (receiverSnap.empty) return res.status(404).json({ error: 'Recipient not found' });
+
+        const receiverDocRef = receiverSnap.docs[0].ref;
+        const receiverDoc = receiverSnap.docs[0];
+        const receiverBalance = parseFloat(decrypt(receiverDoc.data().balance));
+
+        const newSenderBalance = senderBalance - amount;
+        const newReceiverBalance = receiverBalance + amount;
+
+        await updateDoc(senderDocRef, { balance: encrypt(newSenderBalance.toString()) });
+        await updateDoc(receiverDocRef, { balance: encrypt(newReceiverBalance.toString()) });
+
+        io.to(req.user.userId).emit('transfer', { fromWalletId: senderDoc.data().walletId, toWalletId, amount, type: 'peer' });
+        io.to(receiverDoc.id).emit('transfer', { fromWalletId: senderDoc.data().walletId, toWalletId, amount, type: 'peer' });
+
+        res.json({ success: true, message: `Transferred ${amount} USDT to ${toWalletId}` });
+    } catch (error) {
+        console.error('Transfer error:', error);
+        res.status(500).json({ error: 'Transfer error' });
+    }
+});
+
+// Placeholder endpoints (to be expanded later)
+app.post('/api/wallet-id', authenticateToken, async (req, res) => {
+    const userDoc = await getDoc(doc(db, 'users', req.user.userId));
+    res.json({ qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${userDoc.data().walletId}` });
+});
 app.post('/api/add-friend', authenticateToken, (req, res) => res.json({ success: true, message: 'Friend request sent (placeholder)' }));
 app.post('/api/accept-friend', authenticateToken, (req, res) => res.json({ success: true, message: 'Friend accepted (placeholder)' }));
 app.post('/api/ignore-friend', authenticateToken, (req, res) => res.json({ success: true, message: 'Friend ignored (placeholder)' }));
@@ -176,11 +245,8 @@ app.get('/api/chat/:friendId', authenticateToken, (req, res) => res.json({ succe
 app.post('/api/transactions', authenticateToken, (req, res) => res.json({ success: true, transactions: [] }));
 
 io.on('connection', socket => {
-    console.log('Socket connected:', socket.id);
     socket.on('join', userId => socket.join(userId));
-    socket.on('chat', ({ toId, message }) => {
-        io.to(toId).emit('chat', { from: socket.auth.userId, message });
-    });
+    socket.on('chat', ({ toId, message }) => io.to(toId).emit('chat', { from: socket.auth.userId, message }));
 });
 
 const PORT = process.env.PORT || 5000;
