@@ -45,7 +45,7 @@ async function refreshUserData() {
       username: data.username,
       avatar: data.avatar,
       walletId: data.walletId,
-      balance: typeof data.balance === 'number' ? data.balance : 0,
+      balance: data.balance,
       friends: data.friends || [],
       pendingFriends: data.pendingFriends || []
     };
@@ -64,43 +64,30 @@ async function refreshUserData() {
 
 function updateUI() {
   const avatarEl = document.getElementById('avatar');
-  const avatarUrl = userData.avatar ? `${userData.avatar}?t=${Date.now()}` : 'https://via.placeholder.com/40'; // Cache-busting with timestamp
+  const avatarUrl = userData.avatar ? `${userData.avatar}?t=${Date.now()}` : 'https://via.placeholder.com/40';
   console.log('Attempting to set avatar URL:', avatarUrl);
-
-  // Reset avatar to force reload
   avatarEl.removeAttribute('src');
   avatarEl.src = avatarUrl;
-
-  // Detailed event listeners for debugging
-  avatarEl.onload = () => {
-    console.log('Avatar loaded successfully:', avatarEl.src);
-    avatarEl.style.opacity = 1; // Ensure visibility
-  };
+  avatarEl.onload = () => console.log('Avatar loaded successfully:', avatarEl.src);
   avatarEl.onerror = () => {
-    console.warn('Avatar failed to load:', avatarUrl);
+    console.warn('Avatar failed to load:', avatarUrl, 'Switching to fallback');
     avatarEl.src = 'https://via.placeholder.com/40';
-    console.log('Switched to fallback avatar:', avatarEl.src);
   };
 
-  const usernameEl = document.getElementById('username');
-  console.log('Setting username:', userData.username);
-  usernameEl.textContent = userData.username || 'Unknown';
+  document.getElementById('username').textContent = userData.username || 'Unknown';
+  document.getElementById('discord-id').textContent = `ID: ${userData.userId}`;
+  document.getElementById('balance-amount').textContent = `${userData.balance || 0} USDT`;
+  document.getElementById('wallet-id').textContent = userData.walletId || 'N/A';
+}
 
-  const discordIdEl = document.getElementById('discord-id');
-  console.log('Setting Discord ID:', userData.userId);
-  discordIdEl.textContent = `ID: ${userData.userId}`;
-
-  const balanceEl = document.getElementById('balance-amount');
-  const balanceValue = typeof userData.balance === 'number' ? userData.balance : 0;
-  console.log('Setting balance:', balanceValue);
-  balanceEl.textContent = `${balanceValue} USDT`;
-
-  const walletIdEl = document.getElementById('wallet-id');
-  console.log('Setting wallet ID:', userData.walletId);
-  walletIdEl.textContent = userData.walletId || 'N/A';
-
-  // Final verification
-  console.log('UI Updated - Avatar:', avatarEl.src, 'Username:', usernameEl.textContent, 'Balance:', balanceEl.textContent);
+async function getOwnerWallet() {
+  try {
+    const data = await fetchWithToken('/api/owner-wallet', { method: 'GET' });
+    return { address: data.wallet, qrCode: data.qrCode };
+  } catch (error) {
+    console.error('Error fetching owner wallet:', error);
+    return { address: 'Error', qrCode: 'https://via.placeholder.com/150' };
+  }
 }
 
 function updateFriendsList() {
@@ -135,9 +122,10 @@ function updateFriendsList() {
 
 async function updateQRCode() {
   try {
-    const data = await fetchWithToken('/api/wallet-id');
-    document.getElementById('qr-code').src = data.qrCode || 'https://via.placeholder.com/150';
+    const ownerWallet = await getOwnerWallet();
+    document.getElementById('qr-code').src = ownerWallet.qrCode;
     document.getElementById('withdraw-qr').src = '';
+    console.log('Owner wallet for deposits:', ownerWallet.address);
   } catch (error) {
     showError('Error fetching QR code: ' + error.message);
   }
@@ -164,9 +152,9 @@ async function depositFunds() {
     return;
   }
   try {
+    const ownerWallet = await getOwnerWallet();
     const data = await fetchWithToken('/api/deposit', { body: { amount, walletId: userData.walletId } });
-    showSuccess(data.message);
-    refreshUserData();
+    showSuccess(`${data.message} Send ${amount} USDT to: ${ownerWallet.address}`);
     document.getElementById('deposit-amount').value = '';
   } catch (error) {
     showError('Deposit failed: ' + error.message);
@@ -219,11 +207,10 @@ async function withdrawFunds() {
   }
   try {
     const data = await fetchWithToken('/api/withdraw', { body: { amount, withdrawalWalletId: withdrawalWallet } });
-    showSuccess(data.message);
+    showSuccess(`${data.message} Sending ${amount} USDT to: ${withdrawalWallet}`);
     refreshUserData();
     document.getElementById('withdraw-amount').value = '';
     document.getElementById('withdrawal-wallet').value = '';
-    document.getElementById('withdraw-qr').src = data.qrCode || 'https://via.placeholder.com/150';
   } catch (error) {
     showError('Withdrawal failed: ' + error.message);
   }
@@ -255,103 +242,4 @@ async function acceptFriend(friendId) {
   }
 }
 
-async function ignoreFriend(friendId) {
-  try {
-    const data = await fetchWithToken('/api/ignore-friend', { body: { friendId } });
-    showSuccess(data.message);
-    refreshUserData();
-  } catch (error) {
-    showError('Ignore friend failed: ' + error.message);
-  }
-}
-
-function startChat(friendId, friendUsername) {
-  currentChatId = friendId;
-  document.getElementById('chat-with').textContent = friendUsername;
-  fetchChatHistory(friendId);
-  document.getElementById('chat-panel').classList.remove('hidden');
-  document.getElementById('chat-panel').classList.add('open');
-}
-
-function closeChat() {
-  document.getElementById('chat-panel').classList.remove('open');
-  document.getElementById('chat-panel').classList.add('hidden');
-  currentChatId = null;
-}
-
-async function fetchChatHistory(friendId) {
-  try {
-    const data = await fetchWithToken(`/api/chat/${friendId}`, { method: 'GET' });
-    const chatBox = document.getElementById('chat-box');
-    const noMessages = document.getElementById('no-messages');
-    if (data.messages && data.messages.length > 0) {
-      chatBox.innerHTML = data.messages.map(msg => `<p>${msg.from === userData.userId ? 'You' : friendId}: ${msg.message}</p>`).join('');
-      if (noMessages) noMessages.remove();
-    } else {
-      chatBox.innerHTML = `
-        <div id="no-messages">
-          <span style="font-size: 24px;">📩</span>
-          <p>No messages</p>
-          <p>Messages from your friend will be shown here</p>
-        </div>
-      `;
-    }
-    chatBox.scrollTop = chatBox.scrollHeight;
-  } catch (error) {
-    showError('Error fetching chat history: ' + error.message);
-  }
-}
-
-function sendChat() {
-  if (!currentChatId) return;
-  const message = document.getElementById('chat-input').value.trim();
-  if (!message) return;
-  socket.emit('chat', { toId: currentChatId, message });
-  document.getElementById('chat-input').value = '';
-}
-
-socket.on('chat', ({ from, message }) => {
-  if (from === currentChatId || from === userData.userId) {
-    const chatBox = document.getElementById('chat-box');
-    const noMessages = document.getElementById('no-messages');
-    if (noMessages) noMessages.remove();
-    chatBox.innerHTML += `<p>${from === userData.userId ? 'You' : from}: ${message}</p>`;
-    chatBox.scrollTop = chatBox.scrollHeight;
-  }
-});
-
-socket.on('transfer', (data) => {
-  if (data.walletId === userData.walletId || data.fromWalletId === userData.walletId || data.toWalletId === userData.walletId) {
-    refreshUserData();
-    if (data.type === 'peer' || data.type === 'owner' || data.type === 'deposit' || data.type === 'withdrawal') {
-      searchTransactions();
-    }
-  }
-});
-
-async function searchTransactions() {
-  try {
-    const data = await fetchWithToken('/api/transactions');
-    const transList = document.getElementById('trans-list');
-    transList.innerHTML = data.transactions
-      .map(t => `<p>From: ${t.fromWalletId}, To: ${t.toWalletId}, Amount: ${t.amount} USDT, Time: ${new Date(t.timestamp.seconds * 1000)}${t.type === 'owner_transfer' ? ' (To Owner)' : t.type === 'withdrawal' ? ` (Fee: ${t.fee} USDT)` : ''}</p>`)
-      .join('');
-  } catch (error) {
-    showError('Error fetching transactions: ' + error.message);
-  }
-}
-
-function showSuccess(message) {
-  alert(message);
-}
-
-function showError(message) {
-  alert(message);
-}
-
-function logout() {
-  localStorage.clear();
-  window.location.href = '/';
-}
-
-showSection('deposit');
+asyn
