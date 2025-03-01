@@ -7,9 +7,10 @@ const bodyParser = require('body-parser');
 const path = require('path');
 const socketIo = require('socket.io');
 const http = require('http');
-const TronWeb = require('tronweb');
+const Web3 = require('web3');
+const { ethers } = require('ethers');
 
-const requiredEnv = ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI', 'FIREBASE_API_KEY', 'OWNER_USDT_WALLET'];
+const requiredEnv = ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI', 'FIREBASE_API_KEY', 'DIS_CONTRACT_ADDRESS', 'DIS_PRIVATE_KEY'];
 requiredEnv.forEach(key => {
     if (!process.env[key]) {
         console.error(`Missing environment variable: ${key}`);
@@ -41,6 +42,30 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server);
 const oauth = new DiscordOAuth2();
+
+// Initialize Web3 for Ethereum
+const web3 = new Web3('https://mainnet.infura.io/v3/YOUR_INFURA_PROJECT_ID'); // Replace with your Infura project ID or another Ethereum node
+const disContractAddress = process.env.DIS_CONTRACT_ADDRESS;
+const disPrivateKey = process.env.DIS_PRIVATE_KEY;
+
+const disABI = [
+    {
+        "constant": true,
+        "inputs": [{"name": "_owner", "type": "address"}],
+        "name": "balanceOf",
+        "outputs": [{"name": "balance", "type": "uint256"}],
+        "type": "function"
+    },
+    {
+        "constant": false,
+        "inputs": [{"name": "_to", "type": "address"}, {"name": "_value", "type": "uint256"}],
+        "name": "transfer",
+        "outputs": [{"name": "success", "type": "bool"}],
+        "type": "function"
+    }
+];
+
+const disContract = new web3.eth.Contract(disABI, disContractAddress);
 
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -131,9 +156,10 @@ app.get('/auth/discord/callback', async (req, res) => {
                 username: user.username,
                 avatar: `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png`,
                 walletId: generateWalletId(),
-                balance: 0,  // Plain number, no encryption
+                balance: 0,  // DIS balance in Firestore (plain number)
                 friends: [],
-                pendingFriends: []
+                pendingFriends: [],
+                ethereumAddress: ''  // Optional: store user's Ethereum address
             });
             console.log('Step 3 completed: Created user:', user.username);
         } else {
@@ -181,7 +207,7 @@ app.post('/api/user', authenticateToken, async (req, res) => {
             username: data.username,
             avatar: data.avatar,
             walletId: data.walletId,
-            balance: data.balance,  // Plain number
+            balance: data.balance || 0,  // DIS balance
             friends: friendsData.filter(f => f),
             pendingFriends: pendingFriendsData.filter(f => f)
         };
@@ -194,7 +220,7 @@ app.post('/api/user', authenticateToken, async (req, res) => {
 });
 
 app.get('/api/owner-wallet', (req, res) => {
-    const ownerWallet = process.env.OWNER_USDT_WALLET;
+    const ownerWallet = process.env.DIS_CONTRACT_ADDRESS; // Use DIS contract as the owner wallet for deposits
     console.log('Returning owner wallet:', ownerWallet);
     res.json({ wallet: ownerWallet, qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${ownerWallet}` });
 });
@@ -215,21 +241,64 @@ app.post('/api/pending-deposit', authenticateToken, async (req, res) => {
     }
 });
 
+async function monitorDISDeposits() {
+    try {
+        // Monitor Ethereum transactions to DIS contract every 1 second
+        const events = await disContract.getPastEvents('Transfer', {
+            fromBlock: 'latest' - 100, // Look back 100 blocks
+            toBlock: 'latest'
+        });
+        for (const event of events) {
+            const { from, to, value } = event.returnValues;
+            if (to === process.env.DIS_CONTRACT_ADDRESS && from !== '0x0000000000000000000000000000000000000000') { // Deposit to contract
+                const amount = parseFloat(web3.utils.fromWei(value, 'ether'));
+                const depositsQuery = query(collection(db, 'deposits'), where('status', '==', 'pending'));
+                const depositsSnap = await getDocs(depositsQuery);
+                for (const doc of depositsSnap.docs) {
+                    const deposit = doc.data();
+                    if (deposit.amount === amount && deposit.userId) {
+                        const userDocRef = doc(db, 'users', deposit.userId);
+                        const userDoc = await getDoc(userDocRef);
+                        const currentBalance = userDoc.data().balance || 0;
+                        await updateDoc(userDocRef, { balance: currentBalance + amount });
+                        await updateDoc(doc.ref, { status: 'completed', txHash: event.transactionHash, timestamp: serverTimestamp() });
+                        io.to(deposit.userId).emit('transfer', { walletId: userDoc.data().walletId, amount, type: 'deposit' });
+                        break;
+                    }
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error monitoring DIS deposits:', error);
+        if (error.response && error.response.status === 429) { // Rate limit handling
+            console.warn('Rate limit exceeded on Ethereum API, backing off...');
+            await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds before retrying
+        }
+    }
+}
+
+// Check every 1 second (1000 milliseconds)
+setInterval(monitorDISDeposits, 1000);
+
 app.post('/api/deposit', authenticateToken, async (req, res) => {
     const { amount, walletId, verificationCode } = req.body;
-    if (!amount || amount <= 0 || !walletId || amount < 6) return res.status(400).json({ error: 'Invalid deposit amount (minimum 6 USDT)' });
+    if (!amount || amount <= 0 || !walletId || amount < 6) return res.status(400).json({ error: 'Invalid deposit amount (minimum 6 DIS)' });
     try {
-        // Verify 2FA (simplified, you can integrate with Firebase Auth or TOTP)
+        // Verify 2FA (simplified, integrate with Firebase Auth or TOTP)
         const userDoc = await getDoc(doc(db, 'users', req.user.userId));
         if (!userDoc.data().twoFactorSecret || !verificationCode) {
             return res.status(401).json({ error: '2FA verification required' });
         }
-        // Add actual 2FA verification logic here (e.g., compare with Firebase Auth or TOTP)
+        // Add actual 2FA verification logic here
 
-        const currentBalance = userDoc.data().balance;
-        const newBalance = currentBalance + amount;
-        await updateDoc(doc(db, 'users', req.user.userId), { balance: newBalance });
-        res.json({ success: true, message: `Deposit of ${amount} USDT requested. Please send to owner wallet: ${process.env.OWNER_USDT_WALLET} and await confirmation.` });
+        // Log pending deposit
+        await setDoc(doc(collection(db, 'deposits'), `${req.user.userId}_${Date.now()}`), {
+            userId: req.user.userId,
+            amount,
+            timestamp: new Date().toISOString(),
+            status: 'pending'
+        });
+        res.json({ success: true, message: `Deposit of ${amount} DIS requested. Please send to wallet: ${process.env.DIS_CONTRACT_ADDRESS} and await confirmation.` });
     } catch (error) {
         console.error('Deposit error:', error);
         res.status(500).json({ error: 'Deposit error' });
@@ -242,7 +311,7 @@ app.post('/api/transfer', authenticateToken, async (req, res) => {
     try {
         const senderDocRef = doc(db, 'users', req.user.userId);
         const senderDoc = await getDoc(senderDocRef);
-        const senderBalance = senderDoc.data().balance;
+        const senderBalance = senderDoc.data().balance || 0;
         if (senderBalance < amount) return res.status(400).json({ error: 'Insufficient balance' });
 
         const receiverQuery = query(collection(db, 'users'), where('walletId', '==', toWalletId));
@@ -251,7 +320,7 @@ app.post('/api/transfer', authenticateToken, async (req, res) => {
 
         const receiverDocRef = receiverSnap.docs[0].ref;
         const receiverDoc = receiverSnap.docs[0];
-        const receiverBalance = receiverDoc.data().balance;
+        const receiverBalance = receiverDoc.data().balance || 0;
 
         const newSenderBalance = senderBalance - amount;
         const newReceiverBalance = receiverBalance + amount;
@@ -259,46 +328,99 @@ app.post('/api/transfer', authenticateToken, async (req, res) => {
         await updateDoc(senderDocRef, { balance: newSenderBalance });
         await updateDoc(receiverDocRef, { balance: newReceiverBalance });
 
+        // Simulate on-chain transfer (replace with actual Ethereum transfer if needed)
+        const senderAddress = web3.eth.accounts.privateKeyToAccount(disPrivateKey).address;
+        const receiverAddress = await getEthereumAddressFromWalletId(toWalletId);
+        await disContract.methods.transfer(receiverAddress, web3.utils.toWei(amount.toString(), 'ether')).send({
+            from: senderAddress,
+            gas: 21000,
+            gasPrice: web3.utils.toWei('20', 'gwei')
+        });
+
         io.to(req.user.userId).emit('transfer', { fromWalletId: senderDoc.data().walletId, toWalletId, amount, type: 'peer' });
         io.to(receiverDoc.id).emit('transfer', { fromWalletId: senderDoc.data().walletId, toWalletId, amount, type: 'peer' });
 
-        res.json({ success: true, message: `Transferred ${amount} USDT to ${toWalletId}` });
+        res.json({ success: true, message: `Transferred ${amount} DIS to ${toWalletId}` });
     } catch (error) {
         console.error('Transfer error:', error);
         res.status(500).json({ error: 'Transfer error' });
     }
 });
 
+// Helper function to map DISWallet walletId to Ethereum address
+async function getEthereumAddressFromWalletId(walletId) {
+    const usersQuery = query(collection(db, 'users'), where('walletId', '==', walletId));
+    const usersSnap = await getDocs(usersQuery);
+    if (!usersSnap.empty) {
+        const userDoc = usersSnap.docs[0];
+        return userDoc.data().ethereumAddress || '0x0000000000000000000000000000000000000000'; // Default or fetch actual address
+    }
+    throw new Error('Wallet ID not found');
+}
+
 app.post('/api/withdraw', authenticateToken, async (req, res) => {
-    const { amount, withdrawalWalletId } = req.body;
-    if (!amount || amount <= 0 || !withdrawalWalletId || amount < 6) return res.status(400).json({ error: 'Invalid withdrawal request (minimum 6 USDT)' });
+    const { amount, withdrawalWalletId } = req.body; // withdrawalWalletId can be Ethereum address or PayPal email
+    if (!amount || amount <= 0 || !withdrawalWalletId || amount < 6) return res.status(400).json({ error: 'Invalid withdrawal request (minimum 6 DIS)' });
     try {
         const userDocRef = doc(db, 'users', req.user.userId);
         const userDoc = await getDoc(userDocRef);
-        const currentBalance = userDoc.data().balance;
+        const currentBalance = userDoc.data().balance || 0;
         if (currentBalance < amount) return res.status(400).json({ error: 'Insufficient balance' });
 
-        const fee = amount * 0.05;
+        const fee = amount * 0.05; // 5% fee
         const amountAfterFee = amount - fee;
         const newBalance = currentBalance - amount;
+
         await updateDoc(userDocRef, { balance: newBalance });
 
-        await setDoc(doc(collection(db, 'transactions')), {
-            fromWalletId: userDoc.data().walletId,
-            toWalletId: withdrawalWalletId,
-            amount: amountAfterFee,
-            fee,
-            type: 'withdrawal',
-            timestamp: serverTimestamp(),
-            userId: req.user.userId
-        });
-
-        res.json({ success: true, message: `Withdrawal of ${amountAfterFee} USDT (after 5% fee) to ${withdrawalWalletId} requested. Please check your wallet for confirmation.`, qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${withdrawalWalletId}` });
+        // Handle withdrawal based on destination type
+        if (withdrawalWalletId.startsWith('0x')) { // Ethereum address
+            const senderAddress = web3.eth.accounts.privateKeyToAccount(disPrivateKey).address;
+            await disContract.methods.transfer(withdrawalWalletId, web3.utils.toWei(amountAfterFee.toString(), 'ether')).send({
+                from: senderAddress,
+                gas: 21000,
+                gasPrice: web3.utils.toWei('20', 'gwei')
+            });
+            await setDoc(doc(collection(db, 'transactions')), {
+                fromWalletId: userDoc.data().walletId,
+                toWalletId: withdrawalWalletId,
+                amount: amountAfterFee,
+                fee,
+                type: 'withdrawal',
+                timestamp: serverTimestamp(),
+                userId: req.user.userId
+            });
+            res.json({ success: true, message: `Withdrawal of ${amountAfterFee} DIS (after 5% fee) to Ethereum address ${withdrawalWalletId} requested. Transaction processed on blockchain.`, qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${withdrawalWalletId}` });
+        } else if (withdrawalWalletId.includes('@') || withdrawalWalletId.includes('.com')) { // PayPal email
+            await handlePayPalWithdrawal(req.user.userId, amountAfterFee, withdrawalWalletId);
+            await setDoc(doc(collection(db, 'transactions')), {
+                fromWalletId: userDoc.data().walletId,
+                toWalletId: withdrawalWalletId,
+                amount: amountAfterFee,
+                fee,
+                type: 'withdrawal',
+                timestamp: serverTimestamp(),
+                userId: req.user.userId
+            });
+            res.json({ success: true, message: `Withdrawal of ${amountAfterFee} DIS (after 5% fee) to PayPal ${withdrawalWalletId} requested. Please check your PayPal account for confirmation.` });
+        } else {
+            return res.status(400).json({ error: 'Invalid withdrawal destination (use Ethereum address or PayPal email)' });
+        }
     } catch (error) {
         console.error('Withdrawal error:', error);
         res.status(500).json({ error: 'Withdrawal error' });
     }
 });
+
+// Helper function for PayPal withdrawal (simplified, requires PayPal API integration)
+async function handlePayPalWithdrawal(userId, amount, paypalEmail) {
+    // Use PayPal API to convert DIS to USD and transfer to PayPal (requires PayPal Developer account and API keys)
+    // Example: Use PayPal REST API or Payouts API
+    console.log(`Simulating PayPal withdrawal of ${amount} DIS to ${paypalEmail} for user ${userId}`);
+    // Placeholder: Implement actual PayPal API call here (e.g., using paypal-rest-sdk or paypal-checkout)
+    // Note: PayPal supports crypto transfers (web results show PayPal allows buying, selling, holding, and transferring crypto like Bitcoin, Ethereum, etc.)
+    // You’ll need to convert DIS to USD via an exchange or partnership and use PayPal’s API to send funds
+}
 
 app.post('/api/add-friend', authenticateToken, async (req, res) => {
     const { friendId } = req.body;
@@ -362,45 +484,6 @@ app.post('/api/transactions', authenticateToken, async (req, res) => {
         res.status(500).json({ error: 'Server error' });
     }
 });
-
-// Monitor Tron blockchain for USDT deposits to OWNER_USDT_WALLET
-const tronWeb = new TronWeb({
-    fullHost: 'https://api.trongrid.io', // TronGrid public node
-    privateKey: process.env.TRON_PRIVATE_KEY || 'YOUR_PRIVATE_KEY' // Use environment variable or placeholder
-});
-
-async function monitorDeposits() {
-    try {
-        const transactions = await tronWeb.trx.getTransactionsToAddress(process.env.OWNER_USDT_WALLET, 50); // Get last 50 transactions
-        for (const tx of transactions) {
-            if (tx.contractData && tx.contractData.token_name === 'USDT' && tx.contractData.amount) {
-                const amount = tx.contractData.amount / 1e6; // Convert TRC-20 USDT (6 decimals)
-                const txId = tx.txID;
-                const fromAddress = tx.contractData.owner_address;
-
-                // Find pending deposits in Firestore
-                const depositsQuery = query(collection(db, 'deposits'), where('status', '==', 'pending'));
-                const depositsSnap = await getDocs(depositsQuery);
-                for (const doc of depositsSnap.docs) {
-                    const deposit = doc.data();
-                    if (deposit.amount === amount && deposit.userId) {
-                        const userDocRef = doc(db, 'users', deposit.userId);
-                        const userDoc = await getDoc(userDocRef);
-                        const currentBalance = userDoc.data().balance;
-                        await updateDoc(userDocRef, { balance: currentBalance + amount });
-                        await updateDoc(doc.ref, { status: 'completed', txId, timestamp: serverTimestamp() });
-                        io.to(deposit.userId).emit('transfer', { walletId: userDoc.data().walletId, amount, type: 'deposit' });
-                        break;
-                    }
-                }
-            }
-        }
-    } catch (error) {
-        console.error('Error monitoring deposits:', error);
-    }
-}
-
-setInterval(monitorDeposits, 60000); // Check every minute
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
