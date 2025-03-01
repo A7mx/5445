@@ -13,9 +13,7 @@
     "body-parser": "^1.20.2",
     "dotenv": "^16.4.5",
     "socket.io": "^4.7.5",
-    "bybit-api": "^3.0.0"  // Bybit API client
-    // "tronweb": "5.3.2",  // Commented out
-    // "@noble/secp256k1": "1.7.1"  // Commented out
+    "bybit-api": "^3.0.0"  
   },
   "engines": {
     "node": "22.x"
