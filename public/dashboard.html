@@ -11,16 +11,16 @@
     <h1 id="logo">DISWallet</h1>
     <div id="user-profile">
       <div id="balance" onclick="toggleDeposit()">
-        <span id="balance-amount"></span>
+        <span id="balance-amount">0 USDT</span>
         <div id="deposit-option" class="hidden">
           <button onclick="deposit()">Deposit</button>
         </div>
       </div>
-      <img id="avatar" src="" alt="Avatar" onclick="toggleUserInfo()">
+      <img id="avatar" src="https://via.placeholder.com/40" alt="Avatar" onclick="toggleUserInfo()">
       <div id="user-info" class="hidden">
-        <span id="username"></span>
+        <span id="username">Loading...</span>
         <span id="discord-id"></span>
-        <button id="logout" onclick="window.location.href='/auth/discord/logout'">Logout</button>
+        <button id="logout" onclick="logout()">Logout</button>
       </div>
     </div>
   </header>
@@ -39,27 +39,27 @@
     <main class="content">
       <section id="deposit" class="card active">
         <h2>Deposit Funds</h2>
-        <p>Your Wallet ID: <span id="wallet-id"></span></p>
-        <img id="qr-code" alt="QR Code for Deposit">
-        <input id="deposit-amount" type="number" placeholder="Amount to Deposit (DIS)" step="0.01">
+        <p>Your Wallet ID: <span id="wallet-id">Loading...</span></p>
+        <img id="qr-code" src="https://via.placeholder.com/150" alt="QR Code for Deposit">
+        <input id="deposit-amount" type="number" placeholder="Amount to Deposit (USDT)" step="0.01">
         <button onclick="depositFunds()">Deposit Now</button>
-        <p class="tip">Scan the QR code or use your wallet ID to deposit DIS securely.</p>
+        <p class="tip">Scan the QR code or use your wallet ID to deposit USDT securely.</p>
       </section>
       <section id="transfer" class="card">
         <h2>Transfer Funds</h2>
         <input id="transfer-to-wallet" placeholder="Recipient Wallet ID (or 'owner' for owner wallet)">
-        <input id="transfer-amount" type="number" placeholder="Amount to Transfer (DIS)" step="0.01">
+        <input id="transfer-amount" type="number" placeholder="Amount to Transfer (USDT)" step="0.01">
         <button onclick="transferFunds()">Transfer Now</button>
-        <p class="tip">Transfer DIS to another wallet or the owner wallet instantly using their wallet ID.</p>
+        <p class="tip">Transfer USDT to another wallet or the owner wallet instantly using their wallet ID.</p>
       </section>
       <section id="withdraw" class="card">
         <h2>Withdraw Funds</h2>
-        <input id="withdraw-amount" type="number" placeholder="Amount to Withdraw (DIS)" step="0.01">
+        <input id="withdraw-amount" type="number" placeholder="Amount to Withdraw (USDT)" step="0.01">
         <input id="withdrawal-wallet" placeholder="Withdrawal Wallet ID">
         <p>5% Withdrawal Fee Will Apply (Fee Goes to Owner Wallet)</p>
         <button onclick="withdrawFunds()">Withdraw Now</button>
-        <img id="withdraw-qr" alt="QR Code for Withdrawal">
-        <p class="tip">Receive your DIS with a secure QR code for the withdrawal wallet.</p>
+        <img id="withdraw-qr" src="https://via.placeholder.com/150" alt="QR Code for Withdrawal">
+        <p class="tip">Receive your USDT with a secure QR code for the withdrawal wallet.</p>
       </section>
       <section id="friends" class="card">
         <h2>Friends</h2>
