@@ -352,7 +352,7 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
         const currentBalance = userDoc.data().balance || 0;
         if (currentBalance < amount) return res.status(400).json({ error: 'Insufficient balance' });
 
-        const fee = amount * 0.04; // Updated to 4% fee as requested
+        const fee = amount * 0.04; // 4% fee as requested
         const amountAfterFee = amount - fee;
         const newBalance = currentBalance - amount;
 
