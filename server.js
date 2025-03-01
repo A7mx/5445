@@ -8,13 +8,11 @@ const path = require('path');
 const socketIo = require('socket.io');
 const http = require('http');
 
-// Validate environment variables
 const requiredEnv = ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI', 'FIREBASE_API_KEY'];
 requiredEnv.forEach(key => {
     if (!process.env[key]) throw new Error(`Missing env var: ${key}`);
 });
 
-// Initialize Firebase
 const firebaseConfig = {
     apiKey: process.env.FIREBASE_API_KEY,
     authDomain: process.env.FIREBASE_AUTH_DOMAIN,
@@ -28,15 +26,13 @@ const firebaseConfig = {
 const appFirebase = initializeApp(firebaseConfig);
 const db = getFirestore(appFirebase);
 
-// Initialize Express and Socket.io
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server);
+const oauth = new DiscordOAuth2();
 
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
-
-const oauth = new DiscordOAuth2();
 
 function generateToken() {
     return require('crypto').randomBytes(16).toString('hex');
@@ -67,7 +63,6 @@ async function authenticateToken(req, res, next) {
     }
 }
 
-// Routes
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 app.get('/auth/discord', (req, res) => {
@@ -103,11 +98,17 @@ app.get('/auth/discord/callback', async (req, res) => {
                 username: user.username,
                 avatar: `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png`,
                 walletId: generateWalletId(),
-                balance: 0,
+                balance: 0, // Ensure numeric balance
                 friends: [],
                 pendingFriends: []
             });
             console.log('Created user:', user.username);
+        } else {
+            const data = userDoc.data();
+            if (typeof data.balance !== 'number') {
+                await updateDoc(userDocRef, { balance: 0 });
+                console.log('Fixed balance for user:', user.username);
+            }
         }
 
         const sessionToken = generateToken();
@@ -137,15 +138,17 @@ app.post('/api/user', authenticateToken, async (req, res) => {
             const friendDoc = await getDoc(doc(db, 'users', friendId));
             return friendDoc.exists() ? { id: friendId, username: friendDoc.data().username, avatar: friendDoc.data().avatar, walletId: friendDoc.data().walletId } : null;
         }));
-        res.json({
+        const response = {
             userId: userDoc.id,
             username: data.username,
             avatar: data.avatar,
             walletId: data.walletId,
-            balance: data.balance,
+            balance: typeof data.balance === 'number' ? data.balance : 0,
             friends: friendsData.filter(f => f),
             pendingFriends: pendingFriendsData.filter(f => f)
-        });
+        };
+        console.log('Sending user data:', response);
+        res.json(response);
     } catch (error) {
         console.error('API user error:', error);
         res.status(500).json({ error: 'Server error' });
@@ -162,7 +165,7 @@ app.post('/api/wallet-id', authenticateToken, async (req, res) => {
     }
 });
 
-// Placeholder endpoints (to be fully implemented)
+// Placeholder endpoints
 app.post('/api/deposit', authenticateToken, (req, res) => res.json({ success: true, message: 'Deposit initiated (placeholder)' }));
 app.post('/api/transfer', authenticateToken, (req, res) => res.json({ success: true, message: 'Transfer initiated (placeholder)' }));
 app.post('/api/withdraw', authenticateToken, (req, res) => res.json({ success: true, message: 'Withdrawal initiated (placeholder)', qrCode: 'https://via.placeholder.com/150' }));
@@ -172,12 +175,9 @@ app.post('/api/ignore-friend', authenticateToken, (req, res) => res.json({ succe
 app.get('/api/chat/:friendId', authenticateToken, (req, res) => res.json({ success: true, messages: [] }));
 app.post('/api/transactions', authenticateToken, (req, res) => res.json({ success: true, transactions: [] }));
 
-// Socket.io setup
 io.on('connection', socket => {
     console.log('Socket connected:', socket.id);
-    socket.on('join', userId => {
-        socket.join(userId);
-    });
+    socket.on('join', userId => socket.join(userId));
     socket.on('chat', ({ toId, message }) => {
         io.to(toId).emit('chat', { from: socket.auth.userId, message });
     });
