@@ -200,19 +200,19 @@ app.get('/api/owner-wallet', (req, res) => {
 });
 
 app.post('/api/pending-deposit', authenticateToken, async (req, res) => {
-  const { userId, amount, timestamp, status } = req.body;
-  try {
-    await setDoc(doc(collection(db, 'deposits'), `${userId}_${Date.now()}`), {
-      userId,
-      amount,
-      timestamp,
-      status
-    });
-    res.json({ success: true, message: 'Deposit request logged' });
-  } catch (error) {
-    console.error('Pending deposit error:', error);
-    res.status(500).json({ error: 'Server error' });
-  }
+    const { userId, amount, timestamp, status } = req.body;
+    try {
+        await setDoc(doc(collection(db, 'deposits'), `${userId}_${Date.now()}`), {
+            userId,
+            amount,
+            timestamp,
+            status
+        });
+        res.json({ success: true, message: 'Deposit request logged' });
+    } catch (error) {
+        console.error('Pending deposit error:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
 });
 
 app.post('/api/deposit', authenticateToken, async (req, res) => {
@@ -366,7 +366,7 @@ app.post('/api/transactions', authenticateToken, async (req, res) => {
 // Monitor Tron blockchain for USDT deposits to OWNER_USDT_WALLET
 const tronWeb = new TronWeb({
     fullHost: 'https://api.trongrid.io', // TronGrid public node
-    privateKey: 'YOUR_PRIVATE_KEY' // Replace with your private key for TJfMChcqXQoWSpim2XzBjwH1s84BbwzZzZ (store securely)
+    privateKey: process.env.TRON_PRIVATE_KEY || 'YOUR_PRIVATE_KEY' // Use environment variable or placeholder
 });
 
 async function monitorDeposits() {
