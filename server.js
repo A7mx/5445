@@ -7,7 +7,7 @@ const bodyParser = require('body-parser');
 const path = require('path');
 const socketIo = require('socket.io');
 const http = require('http');
-const TronWeb = require('tronweb'); // Added for blockchain monitoring
+const TronWeb = require('tronweb');
 
 const requiredEnv = ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI', 'FIREBASE_API_KEY', 'OWNER_USDT_WALLET'];
 requiredEnv.forEach(key => {
