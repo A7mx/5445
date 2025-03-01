@@ -1,3 +1,4 @@
+// Use CommonJS require syntax
 require('dotenv').config();
 const express = require('express');
 const DiscordOAuth2 = require('discord-oauth2');
@@ -29,32 +30,33 @@ const firebaseConfig = {
 };
 
 let db;
-try {
-    const appFirebase = initializeApp(firebaseConfig);
-    db = getFirestore(appFirebase);
-    console.log('Firestore initialized successfully');
-} catch (error) {
-    console.error('Failed to initialize Firestore:', error);
+let provider, wallet;
+
+(async () => {
+    try {
+        const appFirebase = initializeApp(firebaseConfig);
+        db = getFirestore(appFirebase);
+        console.log('Firestore initialized successfully');
+
+        // Initialize Ethereum provider and wallet with your provided private key
+        provider = new ethers.JsonRpcProvider('https://mainnet.infura.io/v3/' + process.env.INFURA_PROJECT_ID); // Use Infura for Ethereum Mainnet
+        wallet = new ethers.Wallet(process.env.ETH_PRIVATE_KEY, provider);
+        const ownerAddress = await wallet.getAddress();
+        process.env.OWNER_ETH_WALLET = ownerAddress; // Set or verify OWNER_ETH_WALLET
+        console.log('Ethereum wallet initialized successfully with address:', ownerAddress);
+    } catch (error) {
+        console.error('Failed to initialize Firestore or Ethereum wallet:', error);
+        process.exit(1);
+    }
+})().catch(error => {
+    console.error('Initialization error:', error);
     process.exit(1);
-}
+});
 
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server);
 const oauth = new DiscordOAuth2();
-
-// Initialize Ethereum provider and wallet with your provided private key
-let provider, wallet;
-try {
-    provider = new ethers.JsonRpcProvider('https://mainnet.infura.io/v3/YOUR_INFURA_PROJECT_ID'); // Replace with your Infura or Alchemy API key
-    wallet = new ethers.Wallet(process.env.ETH_PRIVATE_KEY, provider);
-    const ownerAddress = await wallet.getAddress();
-    process.env.OWNER_ETH_WALLET = ownerAddress; // Set or verify OWNER_ETH_WALLET
-    console.log('Ethereum wallet initialized successfully with address:', ownerAddress);
-} catch (error) {
-    console.error('Failed to initialize Ethereum wallet:', error);
-    process.exit(1);
-}
 
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
