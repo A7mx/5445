@@ -95,14 +95,21 @@ app.get('/auth/discord', (req, res) => {
         scope: ['identify', 'email'],
         redirectUri: process.env.DISCORD_REDIRECT_URI,
     });
-    console.log('Redirecting to Discord:', url);
+    console.log('Redirecting to Discord OAuth:', url);
     res.redirect(url);
 });
 
 app.get('/auth/discord/callback', async (req, res) => {
     const { code } = req.query;
     console.log('Received OAuth callback with code:', code);
+
+    if (!code) {
+        console.error('No code provided in callback');
+        return res.status(400).send('No authorization code provided');
+    }
+
     try {
+        console.log('Attempting to exchange code for token...');
         const tokenData = await oauth.tokenRequest({
             clientId: process.env.DISCORD_CLIENT_ID,
             clientSecret: process.env.DISCORD_CLIENT_SECRET,
@@ -111,14 +118,17 @@ app.get('/auth/discord/callback', async (req, res) => {
             grantType: 'authorization_code',
             redirectUri: process.env.DISCORD_REDIRECT_URI,
         });
-        console.log('OAuth token received:', tokenData);
+        console.log('OAuth token received:', { access_token: tokenData.access_token, expires_in: tokenData.expires_in });
 
+        console.log('Fetching user data with access token...');
         const user = await oauth.getUser(tokenData.access_token);
         console.log('Fetched Discord user:', { id: user.id, username: user.username, avatar: user.avatar });
 
         const userDocRef = doc(db, 'users', user.id);
+        console.log('Checking Firestore for user:', user.id);
         const userDoc = await getDoc(userDocRef);
         if (!userDoc.exists()) {
+            console.log('User does not exist, creating new user...');
             await setDoc(userDocRef, {
                 username: user.username,
                 avatar: `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png`,
@@ -128,21 +138,27 @@ app.get('/auth/discord/callback', async (req, res) => {
                 pendingFriends: []
             });
             console.log('Created user:', user.username);
+        } else {
+            console.log('User exists:', userDoc.data());
         }
 
         const sessionToken = generateToken();
+        console.log('Generating session token:', sessionToken);
         await setDoc(doc(db, 'sessions', sessionToken), {
             userId: user.id,
             createdAt: serverTimestamp()
         });
-        console.log('Session token:', sessionToken);
+        console.log('Session token saved to Firestore');
 
         const redirectUrl = `/dashboard.html?token=${sessionToken}`;
         console.log('Redirecting to:', redirectUrl);
         res.redirect(redirectUrl);
     } catch (error) {
-        console.error('OAuth error:', error);
-        res.status(500).send('Authentication failed');
+        console.error('Error in OAuth callback:', error.message);
+        if (error.response) {
+            console.error('Error response data:', error.response.data);
+        }
+        res.status(500).send(`Authentication failed: ${error.message}`);
     }
 });
 
@@ -183,7 +199,7 @@ app.get('/api/owner-wallet', (req, res) => {
 
 app.post('/api/deposit', authenticateToken, async (req, res) => {
     const { amount, walletId } = req.body;
-    if (!amount || amount <= 0 || walletId !== userData.walletId) return res.status(400).json({ error: 'Invalid deposit request' });
+    if (!amount || amount <= 0) return res.status(400).json({ error: 'Invalid deposit amount' });
     try {
         const userDocRef = doc(db, 'users', req.user.userId);
         const userDoc = await getDoc(userDocRef);
@@ -243,7 +259,6 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
         const newBalance = currentBalance - amount;
         await updateDoc(userDocRef, { balance: encrypt(newBalance.toString()) });
 
-        // Log transaction (placeholder for actual USDT transfer)
         await setDoc(doc(collection(db, 'transactions')), {
             fromWalletId: userDoc.data().walletId,
             toWalletId: withdrawalWalletId,
@@ -310,6 +325,7 @@ app.get('/api/chat/:friendId', authenticateToken, async (req, res) => {
 
 app.post('/api/transactions', authenticateToken, async (req, res) => {
     try {
+        const userDoc = await getDoc(doc(db, 'users', req.user.userId));
         const q = query(collection(db, 'transactions'), where('fromWalletId', '==', userDoc.data().walletId));
         const snap = await getDocs(q);
         const transactions = snap.docs.map(doc => doc.data());
@@ -322,7 +338,7 @@ app.post('/api/transactions', authenticateToken, async (req, res) => {
 io.on('connection', socket => {
     console.log('Socket connected:', socket.id);
     socket.on('join', userId => socket.join(userId));
-    socket.on('chat', ({ toId, message }) => io.to(toId).emit('chat', { from: socket.auth.userId, message }));
+    socket.on('chat', ({ toId, message }) => io.to(toId).emit('chat', { from: req.user.userId, message }));
 });
 
 const PORT = process.env.PORT || 5000;
