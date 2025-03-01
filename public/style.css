@@ -9,7 +9,6 @@ body {
   background: #1a1a1a;
   color: #fff;
   min-height: 100vh;
-  line-height: 1.6;
   overflow-x: hidden;
 }
 
@@ -18,7 +17,7 @@ header {
   justify-content: space-between;
   align-items: center;
   padding: 15px 30px;
-  background: #2a5298;
+  background: #2c2c2c;
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
   position: fixed;
   width: 100%;
@@ -26,69 +25,22 @@ header {
   z-index: 1000;
 }
 
+.header-content {
+  display: flex;
+  align-items: center;
+}
+
 #logo {
   font-family: 'Orbitron', sans-serif;
   font-size: 32px;
   color: #fff;
-  text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.3);
+  margin-right: 20px;
 }
 
 #user-profile {
   display: flex;
   align-items: center;
   position: relative;
-}
-
-#balance {
-  margin-right: 15px;
-  cursor: pointer;
-  position: relative;
-}
-
-#balance-amount {
-  font-size: 16px;
-  font-weight: 700;
-  color: #fff;
-  padding: 5px 10px;
-  background: #3a6ea5;
-  border-radius: 5px;
-  transition: background 0.3s, transform 0.3s;
-}
-
-#balance-amount:hover {
-  background: #4a7eb5;
-  transform: scale(1.05);
-}
-
-#deposit-option {
-  position: absolute;
-  top: 40px;
-  right: 0;
-  background: #2a5298;
-  padding: 10px;
-  border-radius: 8px;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
-  z-index: 10;
-}
-
-#deposit-option.hidden {
-  display: none;
-}
-
-#deposit-option button {
-  background: #27ae60;
-  color: #fff;
-  border: none;
-  padding: 8px 15px;
-  border-radius: 5px;
-  cursor: pointer;
-  font-weight: 700;
-  transition: background 0.3s, transform 0.3s;
-}
-
-#deposit-option button:hover {
-  background: #219653;
-  transform: scale(1.05);
 }
 
 #avatar {
@@ -108,7 +60,7 @@ header {
   position: absolute;
   top: 50px;
   right: 0;
-  background: #2a5298;
+  background: #2c2c2c;
   padding: 15px;
   border-radius: 8px;
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
@@ -143,78 +95,197 @@ header {
   transform: scale(1.05);
 }
 
-.layout {
+.header-actions {
   display: flex;
-  height: calc(100vh - 70px);
-  position: relative;
-  margin-top: 70px; /* Offset for fixed header */
+  align-items: center;
 }
 
-.sidebar {
-  width: 250px;
-  background: #2a2a2a;
-  padding: 20px;
-  box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
-  position: fixed;
-  height: calc(100vh - 70px);
-  top: 70px;
-  left: 0;
-  overflow-y: auto;
-}
-
-.sidebar nav ul {
-  list-style: none;
-}
-
-.sidebar nav ul li {
-  padding: 15px;
-  font-size: 16px;
+.action-btn {
+  background: #2c2c2c;
   color: #fff;
-  cursor: pointer;
+  border: none;
+  padding: 10px 20px;
+  margin-left: 10px;
   border-radius: 5px;
-  margin-bottom: 10px;
+  cursor: pointer;
+  font-weight: 700;
   transition: background 0.3s, transform 0.3s;
+  font-size: 14px;
 }
 
-.sidebar nav ul li:hover,
-.sidebar nav ul li.active {
-  background: #3a6ea5;
-  color: #fff;
-  transform: scale(1.02);
+.action-btn.deposit { background: #27ae60; }
+.action-btn.exchange { background: #f1c40f; }
+.action-btn.send { background: #e74c3c; }
+.action-btn.history { background: #3498db; }
+.action-btn.active { background: #f39c12; opacity: 0.9; }
+
+.action-btn:hover {
+  transform: scale(1.05);
+  opacity: 0.9;
 }
 
-.content {
+.notifications, .menu {
+  font-size: 24px;
+  margin-left: 15px;
+  cursor: pointer;
+  transition: transform 0.3s;
+}
+
+.notifications:hover, .menu:hover {
+  transform: scale(1.1);
+}
+
+.dashboard {
+  display: flex;
+  margin-top: 70px;
+  padding: 20px;
+  gap: 20px;
+}
+
+.balance-section {
   flex: 1;
-  padding: 30px;
-  overflow-y: auto;
-  background: #1a1a1a;
-  margin-left: 250px; /* Offset for sidebar */
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
 
-.card {
-  background: #2a2a2a;
+.balance-card {
+  background: #2c2c2c;
   padding: 20px;
   border-radius: 10px;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
-  margin-bottom: 20px;
-  display: none;
+  text-align: center;
+}
+
+.balance-card h2 {
+  font-size: 18px;
+  color: #999;
+  margin-bottom: 10px;
+}
+
+.balance-value {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 40px;
+  color: #f39c12;
+  margin-bottom: 10px;
+}
+
+.last-transaction {
+  font-size: 12px;
+  color: #999;
+}
+
+.coin-list {
+  background: #2c2c2c;
+  padding: 20px;
+  border-radius: 10px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+.coin-filter {
+  display: flex;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.coin-filter-btn {
+  background: #2c2c2c;
+  color: #fff;
+  border: none;
+  padding: 8px 15px;
+  margin-right: 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 0.3s;
+}
+
+.coin-filter-btn.active {
+  background: #f39c12;
+}
+
+#coin-search {
+  flex: 1;
+  padding: 8px;
+  border: 1px solid #444;
+  border-radius: 5px;
+  background: #3a3a3a;
   color: #fff;
 }
 
-.card.active {
+#coin-list {
+  list-style: none;
+}
+
+.coin-item {
+  display: flex;
+  align-items: center;
+  padding: 10px;
+  border-bottom: 1px solid #444;
+  transition: background 0.3s;
+}
+
+.coin-item:hover {
+  background: #3a3a3a;
+}
+
+.coin-icon {
+  width: 24px;
+  height: 24px;
+  margin-right: 10px;
+}
+
+.coin-name, .coin-balance, .coin-value, .coin-change {
+  flex: 1;
+  font-size: 14px;
+  color: #fff;
+}
+
+.coin-change {
+  color: #e74c3c;
+}
+
+.buy-btn {
+  background: #3498db;
+  color: #fff;
+  border: none;
+  padding: 5px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 0.3s, transform 0.3s;
+}
+
+.buy-btn:hover {
+  background: #2980b9;
+  transform: scale(1.05);
+}
+
+.content-sections {
+  flex: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.content-card {
+  background: #2c2c2c;
+  padding: 20px;
+  border-radius: 10px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+  display: none;
+}
+
+.content-card.active {
   display: block;
 }
 
-.card h2 {
+.content-card h2 {
   font-family: 'Orbitron', sans-serif;
-  color: #3a6ea5;
+  color: #f39c12;
   margin-bottom: 15px;
   font-size: 24px;
-  text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.3);
 }
 
-input,
-button {
+input, button {
   display: block;
   width: 100%;
   padding: 12px;
@@ -229,24 +300,24 @@ button {
 
 input:focus {
   outline: none;
-  border-color: #3a6ea5;
+  border-color: #f39c12;
   transform: scale(1.02);
 }
 
 button {
-  background: #3a6ea5;
+  background: #3498db;
   color: #fff;
   border: none;
   cursor: pointer;
   font-weight: 700;
   transition: background 0.3s, transform 0.3s, box-shadow 0.3s;
-  box-shadow: 0 4px 10px rgba(58, 110, 165, 0.3);
+  box-shadow: 0 4px 10px rgba(52, 152, 219, 0.3);
 }
 
 button:hover {
-  background: #4a7eb5;
+  background: #2980b9;
   transform: scale(1.05);
-  box-shadow: 0 6px 15px rgba(58, 110, 165, 0.5);
+  box-shadow: 0 6px 15px rgba(52, 152, 219, 0.5);
 }
 
 #trans-list, #chat-box {
@@ -289,7 +360,7 @@ button:hover {
   right: -400px;
   width: 400px;
   height: calc(100vh - 70px);
-  background: #2a2a2a;
+  background: #2c2c2c;
   box-shadow: -2px 0 10px rgba(0, 0, 0, 0.2);
   transition: right 0.3s ease;
   z-index: 100;
@@ -308,7 +379,7 @@ button:hover {
 
 #chat-header {
   padding: 15px;
-  background: #3a6ea5;
+  background: #3498db;
   color: #fff;
   font-size: 18px;
   font-weight: 700;
@@ -320,7 +391,7 @@ button:hover {
 }
 
 #chat-header:hover {
-  background: #4a7eb5;
+  background: #2980b9;
 }
 
 #chat-with {
@@ -381,7 +452,7 @@ button:hover {
 
 #chat-input:focus {
   outline: none;
-  border-color: #3a6ea5;
+  border-color: #f39c12;
   transform: scale(1.02);
 }
 
@@ -389,7 +460,7 @@ button:hover {
   width: 20%;
   padding: 10px;
   margin: 10px;
-  background: #3a6ea5;
+  background: #3498db;
   color: #fff;
   border: none;
   border-radius: 5px;
@@ -397,17 +468,38 @@ button:hover {
   font-weight: 700;
   transition: background 0.3s, transform 0.3s, box-shadow 0.3s;
   vertical-align: top;
-  box-shadow: 0 4px 10px rgba(58, 110, 165, 0.3);
+  box-shadow: 0 4px 10px rgba(52, 152, 219, 0.3);
 }
 
 #chat-send:hover {
-  background: #4a7eb5;
+  background: #2980b9;
   transform: scale(1.05);
-  box-shadow: 0 6px 15px rgba(58, 110, 165, 0.5);
+  box-shadow: 0 6px 15px rgba(52, 152, 219, 0.5);
+}
+
+.sidebar {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.sidebar-section {
+  background: #2c2c2c;
+  padding: 20px;
+  border-radius: 10px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+.sidebar-section h3 {
+  font-family: 'Orbitron', sans-serif;
+  color: #f39c12;
+  margin-bottom: 10px;
+  font-size: 18px;
 }
 
 footer {
-  background: #2a2a2a;
+  background: #2c2c2c;
   padding: 20px;
   text-align: center;
   color: #999;
@@ -421,13 +513,13 @@ footer p {
 }
 
 footer a {
-  color: #3a6ea5;
+  color: #f39c12;
   text-decoration: none;
   transition: color 0.3s;
 }
 
 footer a:hover {
-  color: #4a7eb5;
+  color: #e67e22;
   text-decoration: underline;
 }
 
@@ -443,7 +535,6 @@ footer a:hover {
   transform: scale(1.05);
 }
 
-/* Friends List Styling */
 .friend-item, .pending-item {
   display: flex;
   align-items: center;
@@ -478,30 +569,6 @@ footer a:hover {
   color: #fff;
 }
 
-.friend-item .username, .pending-item .username {
-  display: block;
-  font-weight: 700;
-  color: #3a6ea5;
-  margin-bottom: 5px;
-}
-
-.friend-item .wallet-id, .pending-item .wallet-id {
-  display: block;
-  font-size: 12px;
-  color: #999;
-  overflow-wrap: break-word;
-  word-wrap: break-word;
-  -webkit-hyphens: auto;
-  -ms-hyphens: auto;
-  hyphens: auto;
-  max-width: 200px;
-}
-
-.pending-item {
-  flex-direction: column;
-  align-items: flex-start;
-}
-
 .pending-item button {
   width: auto;
   padding: 5px 10px;
@@ -529,7 +596,6 @@ footer a:hover {
   transform: scale(1.05);
 }
 
-/* Responsive Design */
 @media (max-width: 768px) {
   header {
     padding: 10px 15px;
@@ -541,37 +607,23 @@ footer a:hover {
     margin-bottom: 10px;
   }
 
-  #user-profile {
+  .header-actions {
     margin-top: 10px;
+    justify-content: center;
   }
 
-  .layout {
+  .action-btn {
+    margin: 0 5px;
+    padding: 8px 15px;
+  }
+
+  .dashboard {
     flex-direction: column;
-    margin-top: 60px; /* Adjust for smaller header */
+    margin-top: 60px;
   }
 
-  .sidebar {
+  .balance-section, .content-sections, .sidebar {
     width: 100%;
-    position: relative;
-    height: auto;
-    top: 0;
-    left: 0;
-    margin-left: 0;
-    box-shadow: none;
-  }
-
-  .content {
-    margin-left: 0;
-    padding: 20px;
-  }
-
-  .sidebar nav ul li {
-    padding: 12px;
-    font-size: 14px;
-  }
-
-  .card {
-    margin-bottom: 15px;
   }
 
   .chat-panel {
@@ -592,94 +644,5 @@ footer a:hover {
   .friend-item img, .pending-item img {
     width: 24px;
     height: 24px;
-  }
-
-  .friend-item .username, .pending-item .username {
-    font-size: 12px;
-  }
-
-  .friend-item .wallet-id, .pending-item .wallet-id {
-    font-size: 10px;
-    max-width: 150px;
-  }
-
-  .pending-item button {
-    padding: 4px 8px;
-    font-size: 12px;
-  }
-}
-
-@media (max-width: 480px) {
-  header {
-    padding: 8px 10px;
-  }
-
-  #logo {
-    font-size: 24px;
-  }
-
-  #balance-amount, #deposit-option button, #logout {
-    font-size: 14px;
-    padding: 4px 8px;
-  }
-
-  #avatar {
-    width: 32px;
-    height: 32px;
-  }
-
-  .sidebar nav ul li {
-    padding: 10px;
-    font-size: 12px;
-  }
-
-  .card h2 {
-    font-size: 20px;
-  }
-
-  input, button {
-    padding: 10px;
-    font-size: 12px;
-  }
-
-  #qr-code, #withdraw-qr {
-    max-width: 150px;
-  }
-
-  .tip {
-    font-size: 10px;
-  }
-
-  #chat-header {
-    padding: 10px;
-    font-size: 16px;
-  }
-
-  #chat-input, #chat-send {
-    padding: 8px;
-    font-size: 12px;
-  }
-
-  .friend-item, .pending-item {
-    padding: 6px;
-  }
-
-  .friend-item img, .pending-item img {
-    width: 20px;
-    height: 20px;
-  }
-
-  .friend-item .username, .pending-item .username {
-    font-size: 10px;
-  }
-
-  .friend-item .wallet-id, .pending-item .wallet-id {
-    font-size: 8px;
-    max-width: 120px;
-  }
-
-  .pending-item button {
-    padding: 3px 6px;
-    font-size: 10px;
   }
 }
