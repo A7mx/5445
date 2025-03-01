@@ -9,38 +9,13 @@ const socketIo = require('socket.io');
 const http = require('http');
 const crypto = require('crypto');
 
-const requiredEnv = ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI', 'FIREBASE_API_KEY', 'ENCRYPTION_KEY', 'OWNER_USDT_WALLET'];
+const requiredEnv = ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI', 'FIREBASE_API_KEY', 'OWNER_USDT_WALLET'];
 requiredEnv.forEach(key => {
     if (!process.env[key]) {
         console.error(`Missing environment variable: ${key}`);
         process.exit(1);
     }
 });
-
-// Ensure ENCRYPTION_KEY is 32 bytes (64 hex characters)
-const ENCRYPTION_KEY = Buffer.from(process.env.ENCRYPTION_KEY, 'hex');
-if (ENCRYPTION_KEY.length !== 32) {
-    console.error('ENCRYPTION_KEY must be 32 bytes (64 hex characters). Current length:', ENCRYPTION_KEY.length);
-    process.exit(1);
-}
-const IV_LENGTH = 16;
-
-function encrypt(text) {
-    const iv = crypto.randomBytes(IV_LENGTH);
-    const cipher = crypto.createCipheriv('aes-256-cbc', ENCRYPTION_KEY, iv);
-    let encrypted = cipher.update(text.toString(), 'utf8', 'hex');
-    encrypted += cipher.final('hex');
-    return iv.toString('hex') + ':' + encrypted;
-}
-
-function decrypt(text) {
-    const [ivHex, encryptedHex] = text.split(':');
-    const iv = Buffer.from(ivHex, 'hex');
-    const decipher = crypto.createDecipheriv('aes-256-cbc', ENCRYPTION_KEY, iv);
-    let decrypted = decipher.update(encryptedHex, 'hex', 'utf8');
-    decrypted += decipher.final('utf8');
-    return decrypted;
-}
 
 const firebaseConfig = {
     apiKey: process.env.FIREBASE_API_KEY,
@@ -156,7 +131,7 @@ app.get('/auth/discord/callback', async (req, res) => {
                 username: user.username,
                 avatar: `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png`,
                 walletId: generateWalletId(),
-                balance: encrypt('0'),
+                balance: 0,  // Plain number, no encryption
                 friends: [],
                 pendingFriends: []
             });
@@ -206,7 +181,7 @@ app.post('/api/user', authenticateToken, async (req, res) => {
             username: data.username,
             avatar: data.avatar,
             walletId: data.walletId,
-            balance: parseFloat(decrypt(data.balance)),
+            balance: data.balance,  // Plain number
             friends: friendsData.filter(f => f),
             pendingFriends: pendingFriendsData.filter(f => f)
         };
@@ -230,9 +205,9 @@ app.post('/api/deposit', authenticateToken, async (req, res) => {
     try {
         const userDocRef = doc(db, 'users', req.user.userId);
         const userDoc = await getDoc(userDocRef);
-        const currentBalance = parseFloat(decrypt(userDoc.data().balance));
+        const currentBalance = userDoc.data().balance;
         const newBalance = currentBalance + amount;
-        await updateDoc(userDocRef, { balance: encrypt(newBalance.toString()) });
+        await updateDoc(userDocRef, { balance: newBalance });
         res.json({ success: true, message: `Deposit of ${amount} USDT requested. Please send to owner wallet: ${process.env.OWNER_USDT_WALLET} and await confirmation.` });
     } catch (error) {
         console.error('Deposit error:', error);
@@ -246,7 +221,7 @@ app.post('/api/transfer', authenticateToken, async (req, res) => {
     try {
         const senderDocRef = doc(db, 'users', req.user.userId);
         const senderDoc = await getDoc(senderDocRef);
-        const senderBalance = parseFloat(decrypt(senderDoc.data().balance));
+        const senderBalance = senderDoc.data().balance;
         if (senderBalance < amount) return res.status(400).json({ error: 'Insufficient balance' });
 
         const receiverQuery = query(collection(db, 'users'), where('walletId', '==', toWalletId));
@@ -255,13 +230,13 @@ app.post('/api/transfer', authenticateToken, async (req, res) => {
 
         const receiverDocRef = receiverSnap.docs[0].ref;
         const receiverDoc = receiverSnap.docs[0];
-        const receiverBalance = parseFloat(decrypt(receiverDoc.data().balance));
+        const receiverBalance = receiverDoc.data().balance;
 
         const newSenderBalance = senderBalance - amount;
         const newReceiverBalance = receiverBalance + amount;
 
-        await updateDoc(senderDocRef, { balance: encrypt(newSenderBalance.toString()) });
-        await updateDoc(receiverDocRef, { balance: encrypt(newReceiverBalance.toString()) });
+        await updateDoc(senderDocRef, { balance: newSenderBalance });
+        await updateDoc(receiverDocRef, { balance: newReceiverBalance });
 
         io.to(req.user.userId).emit('transfer', { fromWalletId: senderDoc.data().walletId, toWalletId, amount, type: 'peer' });
         io.to(receiverDoc.id).emit('transfer', { fromWalletId: senderDoc.data().walletId, toWalletId, amount, type: 'peer' });
@@ -279,13 +254,13 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
     try {
         const userDocRef = doc(db, 'users', req.user.userId);
         const userDoc = await getDoc(userDocRef);
-        const currentBalance = parseFloat(decrypt(userDoc.data().balance));
+        const currentBalance = userDoc.data().balance;
         if (currentBalance < amount) return res.status(400).json({ error: 'Insufficient balance' });
 
         const fee = amount * 0.05;
         const amountAfterFee = amount - fee;
         const newBalance = currentBalance - amount;
-        await updateDoc(userDocRef, { balance: encrypt(newBalance.toString()) });
+        await updateDoc(userDocRef, { balance: newBalance });
 
         await setDoc(doc(collection(db, 'transactions')), {
             fromWalletId: userDoc.data().walletId,
