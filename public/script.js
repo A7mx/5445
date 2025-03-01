@@ -39,31 +39,59 @@ async function fetchWithToken(url, options = {}) {
 async function refreshUserData() {
   try {
     const data = await fetchWithToken('/api/user');
-    userData = data;
+    console.log('Raw user data from /api/user:', data);
+    userData = {
+      userId: data.userId,
+      username: data.username,
+      avatar: data.avatar,
+      walletId: data.walletId,
+      balance: typeof data.balance === 'number' ? data.balance : 0, // Ensure balance is a number
+      friends: data.friends || [],
+      pendingFriends: data.pendingFriends || []
+    };
     updateUI();
     socket.emit('join', userData.userId);
     updateFriendsList();
     updateQRCode();
   } catch (error) {
+    console.error('Error fetching user data:', error);
     showError('Error fetching user data: ' + error.message);
     document.getElementById('username').textContent = 'Error';
     document.getElementById('avatar').src = 'https://via.placeholder.com/40';
+    document.getElementById('balance-amount').textContent = '0 USDT';
   }
 }
 
 function updateUI() {
   const avatarEl = document.getElementById('avatar');
-  console.log('Setting avatar URL:', userData.avatar);
-  avatarEl.src = userData.avatar || 'https://via.placeholder.com/40';
-  avatarEl.onload = () => console.log('Avatar loaded successfully');
+  const avatarUrl = userData.avatar ? `${userData.avatar}` : 'https://via.placeholder.com/40';
+  console.log('Setting avatar URL:', avatarUrl);
+  avatarEl.src = ''; // Clear previous src to force reload
+  avatarEl.src = avatarUrl;
+  avatarEl.onload = () => console.log('Avatar loaded successfully:', avatarUrl);
   avatarEl.onerror = () => {
-    console.warn('Avatar failed to load, using fallback');
+    console.warn('Avatar failed to load:', avatarUrl, 'Switching to fallback');
     avatarEl.src = 'https://via.placeholder.com/40';
   };
-  document.getElementById('username').textContent = userData.username || 'Unknown';
-  document.getElementById('discord-id').textContent = `ID: ${userData.userId}`;
-  document.getElementById('balance-amount').textContent = `${userData.balance || 0} USDT`;
-  document.getElementById('wallet-id').textContent = userData.walletId || 'N/A';
+
+  const usernameEl = document.getElementById('username');
+  console.log('Setting username:', userData.username);
+  usernameEl.textContent = userData.username || 'Unknown';
+
+  const discordIdEl = document.getElementById('discord-id');
+  console.log('Setting Discord ID:', userData.userId);
+  discordIdEl.textContent = `ID: ${userData.userId}`;
+
+  const balanceEl = document.getElementById('balance-amount');
+  const balanceValue = typeof userData.balance === 'number' ? userData.balance : 0;
+  console.log('Setting balance:', balanceValue);
+  balanceEl.textContent = `${balanceValue} USDT`;
+
+  const walletIdEl = document.getElementById('wallet-id');
+  console.log('Setting wallet ID:', userData.walletId);
+  walletIdEl.textContent = userData.walletId || 'N/A';
+
+  console.log('UI Updated - Avatar:', avatarEl.src, 'Username:', usernameEl.textContent, 'Balance:', balanceEl.textContent);
 }
 
 function updateFriendsList() {
