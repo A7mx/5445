@@ -11,7 +11,7 @@ const http = require('http');
 const { ethers } = require('ethers');
 const axios = require('axios');
 
-const requiredEnv = ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI', 'FIREBASE_API_KEY', 'OWNER_ETH_WALLET', 'ETH_PRIVATE_KEY'];
+const requiredEnv = ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI', 'FIREBASE_API_KEY', 'OWNER_ETH_WALLET', 'ETH_PRIVATE_KEY', 'INFURA_PROJECT_ID'];
 requiredEnv.forEach(key => {
     if (!process.env[key]) {
         console.error(`Missing environment variable: ${key}`);
@@ -39,13 +39,17 @@ let provider, wallet;
         console.log('Firestore initialized successfully');
 
         // Initialize Ethereum provider and wallet with your provided private key
-        provider = new ethers.JsonRpcProvider('https://mainnet.infura.io/v3/' + process.env.INFURA_PROJECT_ID); // Use Infura for Ethereum Mainnet
+        const infuraUrl = `https://mainnet.infura.io/v3/${process.env.INFURA_PROJECT_ID}`;
+        provider = new ethers.JsonRpcProvider(infuraUrl); // Use Infura for Ethereum Mainnet with explicit URL
         wallet = new ethers.Wallet(process.env.ETH_PRIVATE_KEY, provider);
         const ownerAddress = await wallet.getAddress();
         process.env.OWNER_ETH_WALLET = ownerAddress; // Set or verify OWNER_ETH_WALLET
         console.log('Ethereum wallet initialized successfully with address:', ownerAddress);
     } catch (error) {
         console.error('Failed to initialize Firestore or Ethereum wallet:', error);
+        if (error.code === 'SERVER_ERROR' && error.info && error.info.responseStatus === '401 Unauthorized') {
+            console.error('Infura 401 Unauthorized: Please ensure INFURA_PROJECT_ID is correctly set in environment variables.');
+        }
         process.exit(1);
     }
 })().catch(error => {
@@ -296,8 +300,8 @@ async function monitorETHDeposits() {
         }
     } catch (error) {
         console.error('Error monitoring ETH deposits on Ethereum Mainnet (suppressed from logs):', error);
-        if (error.code === 'RATE_LIMIT_EXCEEDED') { // Handle Infura/Alchemy rate limits
-            console.warn('Rate limit exceeded on Ethereum API, backing off...');
+        if (error.code === 'RATE_LIMIT_EXCEEDED' || (error.code === 'SERVER_ERROR' && error.info && error.info.responseStatus === '401 Unauthorized')) {
+            console.warn('Rate limit or authentication issue on Ethereum API, backing off...');
             await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds before retrying
         }
     }
