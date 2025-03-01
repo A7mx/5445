@@ -14,7 +14,7 @@
     "dotenv": "^16.4.5",
     "socket.io": "^4.7.5",
     "tronweb": "^5.1.7",
-    "@noble/secp256k1": "^1.7.1"  // Added to resolve dependency for tronweb
+    "@noble/secp256k1": "^1.7.1"
   },
   "engines": {
     "node": "22.x"
