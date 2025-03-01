@@ -2,12 +2,14 @@ require('dotenv').config();
 const express = require('express');
 const DiscordOAuth2 = require('discord-oauth2');
 const { initializeApp } = require('firebase/app');
-const { getFirestore, doc, getDoc, setDoc, serverTimestamp } = require('firebase/firestore');
+const { getFirestore, doc, getDoc, setDoc, updateDoc, arrayUnion, serverTimestamp, collection, query, where, getDocs } = require('firebase/firestore');
 const bodyParser = require('body-parser');
 const path = require('path');
+const socketIo = require('socket.io');
+const http = require('http');
 const crypto = require('crypto');
 
-const requiredEnv = ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI', 'FIREBASE_API_KEY', 'ENCRYPTION_KEY'];
+const requiredEnv = ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI', 'FIREBASE_API_KEY', 'ENCRYPTION_KEY', 'OWNER_USDT_WALLET'];
 requiredEnv.forEach(key => {
     if (!process.env[key]) throw new Error(`Missing env var: ${key}`);
 });
@@ -46,6 +48,8 @@ const appFirebase = initializeApp(firebaseConfig);
 const db = getFirestore(appFirebase);
 
 const app = express();
+const server = http.createServer(app);
+const io = socketIo(server);
 const oauth = new DiscordOAuth2();
 
 app.use(bodyParser.json());
@@ -80,7 +84,10 @@ async function authenticateToken(req, res, next) {
     }
 }
 
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+app.get('/', (req, res) => {
+    console.log('Serving index.html');
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 app.get('/auth/discord', (req, res) => {
     const url = oauth.generateAuthUrl({
@@ -88,7 +95,7 @@ app.get('/auth/discord', (req, res) => {
         scope: ['identify', 'email'],
         redirectUri: process.env.DISCORD_REDIRECT_URI,
     });
-    console.log('Redirecting to Discord OAuth:', url);
+    console.log('Redirecting to Discord:', url);
     res.redirect(url);
 });
 
@@ -117,8 +124,10 @@ app.get('/auth/discord/callback', async (req, res) => {
                 avatar: `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png`,
                 walletId: generateWalletId(),
                 balance: encrypt('0'),
+                friends: [],
+                pendingFriends: []
             });
-            console.log('Created new user:', user.username);
+            console.log('Created user:', user.username);
         }
 
         const sessionToken = generateToken();
@@ -126,11 +135,13 @@ app.get('/auth/discord/callback', async (req, res) => {
             userId: user.id,
             createdAt: serverTimestamp()
         });
-        console.log('Session created with token:', sessionToken);
+        console.log('Session token:', sessionToken);
 
-        res.redirect(`/dashboard.html?token=${sessionToken}`);
+        const redirectUrl = `/dashboard.html?token=${sessionToken}`;
+        console.log('Redirecting to:', redirectUrl);
+        res.redirect(redirectUrl);
     } catch (error) {
-        console.error('OAuth callback error:', error);
+        console.error('OAuth error:', error);
         res.status(500).send('Authentication failed');
     }
 });
@@ -138,25 +149,181 @@ app.get('/auth/discord/callback', async (req, res) => {
 app.post('/api/user', authenticateToken, async (req, res) => {
     try {
         const userDoc = await getDoc(doc(db, 'users', req.user.userId));
-        if (!userDoc.exists()) {
-            console.log('User not found:', req.user.userId);
-            return res.status(404).json({ error: 'User not found' });
-        }
+        if (!userDoc.exists()) return res.status(404).json({ error: 'User not found' });
         const data = userDoc.data();
+        const friendsData = await Promise.all((data.friends || []).map(async friendId => {
+            const friendDoc = await getDoc(doc(db, 'users', friendId));
+            return friendDoc.exists() ? { id: friendId, username: friendDoc.data().username, avatar: friendDoc.data().avatar, walletId: friendDoc.data().walletId } : null;
+        }));
+        const pendingFriendsData = await Promise.all((data.pendingFriends || []).map(async friendId => {
+            const friendDoc = await getDoc(doc(db, 'users', friendId));
+            return friendDoc.exists() ? { id: friendId, username: friendDoc.data().username, avatar: friendDoc.data().avatar, walletId: friendDoc.data().walletId } : null;
+        }));
         const response = {
             userId: userDoc.id,
             username: data.username,
             avatar: data.avatar,
             walletId: data.walletId,
             balance: parseFloat(decrypt(data.balance)),
+            friends: friendsData.filter(f => f),
+            pendingFriends: pendingFriendsData.filter(f => f)
         };
-        console.log('Sending user data to client:', response);
+        console.log('Sending user data:', response);
         res.json(response);
     } catch (error) {
-        console.error('API /user error:', error);
+        console.error('API user error:', error);
         res.status(500).json({ error: 'Server error' });
     }
 });
 
+app.get('/api/owner-wallet', (req, res) => {
+    const ownerWallet = process.env.OWNER_USDT_WALLET;
+    res.json({ wallet: ownerWallet, qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${ownerWallet}` });
+});
+
+app.post('/api/deposit', authenticateToken, async (req, res) => {
+    const { amount, walletId } = req.body;
+    if (!amount || amount <= 0 || walletId !== userData.walletId) return res.status(400).json({ error: 'Invalid deposit request' });
+    try {
+        const userDocRef = doc(db, 'users', req.user.userId);
+        const userDoc = await getDoc(userDocRef);
+        const currentBalance = parseFloat(decrypt(userDoc.data().balance));
+        const newBalance = currentBalance + amount;
+        await updateDoc(userDocRef, { balance: encrypt(newBalance.toString()) });
+        res.json({ success: true, message: `Deposit of ${amount} USDT requested. Please send to owner wallet and await confirmation.` });
+    } catch (error) {
+        res.status(500).json({ error: 'Deposit error' });
+    }
+});
+
+app.post('/api/transfer', authenticateToken, async (req, res) => {
+    const { toWalletId, amount } = req.body;
+    if (!toWalletId || !amount || amount <= 0) return res.status(400).json({ error: 'Invalid transfer request' });
+    try {
+        const senderDocRef = doc(db, 'users', req.user.userId);
+        const senderDoc = await getDoc(senderDocRef);
+        const senderBalance = parseFloat(decrypt(senderDoc.data().balance));
+        if (senderBalance < amount) return res.status(400).json({ error: 'Insufficient balance' });
+
+        const receiverQuery = query(collection(db, 'users'), where('walletId', '==', toWalletId));
+        const receiverSnap = await getDocs(receiverQuery);
+        if (receiverSnap.empty) return res.status(404).json({ error: 'Recipient not found' });
+
+        const receiverDocRef = receiverSnap.docs[0].ref;
+        const receiverDoc = receiverSnap.docs[0];
+        const receiverBalance = parseFloat(decrypt(receiverDoc.data().balance));
+
+        const newSenderBalance = senderBalance - amount;
+        const newReceiverBalance = receiverBalance + amount;
+
+        await updateDoc(senderDocRef, { balance: encrypt(newSenderBalance.toString()) });
+        await updateDoc(receiverDocRef, { balance: encrypt(newReceiverBalance.toString()) });
+
+        io.to(req.user.userId).emit('transfer', { fromWalletId: senderDoc.data().walletId, toWalletId, amount, type: 'peer' });
+        io.to(receiverDoc.id).emit('transfer', { fromWalletId: senderDoc.data().walletId, toWalletId, amount, type: 'peer' });
+
+        res.json({ success: true, message: `Transferred ${amount} USDT to ${toWalletId}` });
+    } catch (error) {
+        console.error('Transfer error:', error);
+        res.status(500).json({ error: 'Transfer error' });
+    }
+});
+
+app.post('/api/withdraw', authenticateToken, async (req, res) => {
+    const { amount, withdrawalWalletId } = req.body;
+    if (!amount || amount <= 0 || !withdrawalWalletId) return res.status(400).json({ error: 'Invalid withdrawal request' });
+    try {
+        const userDocRef = doc(db, 'users', req.user.userId);
+        const userDoc = await getDoc(userDocRef);
+        const currentBalance = parseFloat(decrypt(userDoc.data().balance));
+        if (currentBalance < amount) return res.status(400).json({ error: 'Insufficient balance' });
+
+        const fee = amount * 0.05;
+        const amountAfterFee = amount - fee;
+        const newBalance = currentBalance - amount;
+        await updateDoc(userDocRef, { balance: encrypt(newBalance.toString()) });
+
+        // Log transaction (placeholder for actual USDT transfer)
+        await setDoc(doc(collection(db, 'transactions')), {
+            fromWalletId: userDoc.data().walletId,
+            toWalletId: withdrawalWalletId,
+            amount: amountAfterFee,
+            fee,
+            type: 'withdrawal',
+            timestamp: serverTimestamp()
+        });
+
+        res.json({ success: true, message: `Withdrawal of ${amountAfterFee} USDT (after 5% fee) to ${withdrawalWalletId} requested. Processing soon.` });
+    } catch (error) {
+        console.error('Withdrawal error:', error);
+        res.status(500).json({ error: 'Withdrawal error' });
+    }
+});
+
+app.post('/api/add-friend', authenticateToken, async (req, res) => {
+    const { friendId } = req.body;
+    if (!friendId) return res.status(400).json({ error: 'Friend ID required' });
+    try {
+        const userDocRef = doc(db, 'users', req.user.userId);
+        const friendDocRef = doc(db, 'users', friendId);
+        const friendDoc = await getDoc(friendDocRef);
+        if (!friendDoc.exists()) return res.status(404).json({ error: 'Friend not found' });
+
+        await updateDoc(userDocRef, { friends: arrayUnion(friendId) });
+        await updateDoc(friendDocRef, { pendingFriends: arrayUnion(req.user.userId) });
+
+        res.json({ success: true, message: `Friend request sent to ${friendDoc.data().username}` });
+    } catch (error) {
+        console.error('Add friend error:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+app.post('/api/accept-friend', authenticateToken, async (req, res) => {
+    const { friendId } = req.body;
+    try {
+        const userDocRef = doc(db, 'users', req.user.userId);
+        await updateDoc(userDocRef, {
+            friends: arrayUnion(friendId),
+            pendingFriends: arrayRemove(friendId)
+        });
+        res.json({ success: true, message: 'Friend request accepted' });
+    } catch (error) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+app.post('/api/ignore-friend', authenticateToken, async (req, res) => {
+    const { friendId } = req.body;
+    try {
+        const userDocRef = doc(db, 'users', req.user.userId);
+        await updateDoc(userDocRef, { pendingFriends: arrayRemove(friendId) });
+        res.json({ success: true, message: 'Friend request ignored' });
+    } catch (error) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+app.get('/api/chat/:friendId', authenticateToken, async (req, res) => {
+    res.json({ success: true, messages: [] }); // Placeholder
+});
+
+app.post('/api/transactions', authenticateToken, async (req, res) => {
+    try {
+        const q = query(collection(db, 'transactions'), where('fromWalletId', '==', userDoc.data().walletId));
+        const snap = await getDocs(q);
+        const transactions = snap.docs.map(doc => doc.data());
+        res.json({ success: true, transactions });
+    } catch (error) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+io.on('connection', socket => {
+    console.log('Socket connected:', socket.id);
+    socket.on('join', userId => socket.join(userId));
+    socket.on('chat', ({ toId, message }) => io.to(toId).emit('chat', { from: socket.auth.userId, message }));
+});
+
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+server.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
