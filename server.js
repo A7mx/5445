@@ -1,6 +1,7 @@
 // Use CommonJS require syntax
 require('dotenv').config();
 const express = require('express');
+const DiscordOAuth2 = require('discord-oauth2');
 const { initializeApp } = require('firebase/app');
 const { getFirestore, doc, getDoc, setDoc, updateDoc, serverTimestamp, collection } = require('firebase/firestore');
 const bodyParser = require('body-parser');
@@ -10,7 +11,7 @@ const http = require('http');
 const { ethers } = require('ethers');
 const axios = require('axios');
 
-const requiredEnv = ['FIREBASE_API_KEY', 'INFURA_PROJECT_ID'];
+const requiredEnv = ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI', 'FIREBASE_API_KEY', 'INFURA_PROJECT_ID'];
 requiredEnv.forEach(key => {
     if (!process.env[key]) {
         console.error(`Missing environment variable: ${key}`);
@@ -62,6 +63,7 @@ let wallet; // Simulated wallet for trading bot
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server);
+const oauth = new DiscordOAuth2();
 
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -99,6 +101,169 @@ app.get('/', (req, res) => {
 app.get('/dashboard.html', (req, res) => {
     console.log('Serving dashboard.html');
     res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
+});
+
+app.get('/auth/discord', (req, res) => {
+    const url = oauth.generateAuthUrl({
+        clientId: process.env.DISCORD_CLIENT_ID,
+        scope: ['identify', 'email'],
+        redirectUri: process.env.DISCORD_REDIRECT_URI,
+    });
+    console.log('Redirecting to Discord:', url);
+    res.redirect(url);
+});
+
+app.get('/auth/discord/callback', async (req, res) => {
+    const { code } = req.query;
+    console.log('Received OAuth callback with code:', code);
+
+    if (!code) {
+        console.error('No authorization code provided in callback');
+        return res.status(400).send('No authorization code provided');
+    }
+
+    try {
+        console.log('Step 1: Exchanging code for access token...');
+        const tokenData = await oauth.tokenRequest({
+            clientId: process.env.DISCORD_CLIENT_ID,
+            clientSecret: process.env.DISCORD_CLIENT_SECRET,
+            code,
+            scope: ['identify', 'email'],
+            grantType: 'authorization_code',
+            redirectUri: process.env.DISCORD_REDIRECT_URI,
+        });
+        console.log('Step 1 completed: OAuth token received:', {
+            access_token: tokenData.access_token,
+            expires_in: tokenData.expires_in,
+            token_type: tokenData.token_type
+        });
+
+        console.log('Step 2: Fetching user data with access token...');
+        const user = await oauth.getUser(tokenData.access_token);
+        console.log('Step 2 completed: Fetched Discord user:', {
+            id: user.id,
+            username: user.username,
+            avatar: user.avatar
+        });
+
+        const userDocRef = doc(db, 'users', user.id);
+        console.log('Step 3: Checking user in Firestore:', user.id);
+        const userDoc = await getDoc(userDocRef);
+        if (!userDoc.exists()) {
+            console.log('User does not exist, creating new user...');
+            try {
+                await setDoc(userDocRef, {
+                    username: user.username,
+                    avatar: `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png`,
+                    balance: {
+                        ETH: ethers.parseEther('0').toString(), // ETH balance in wei
+                        USDC: '0', // USDC balance (6 decimals, stored as string)
+                        USDT: '0', // USDT balance (6 decimals, stored as string)
+                        DAI: ethers.parseEther('0').toString() // DAI balance in wei
+                    },
+                    ethAddress: '' // Optional: store user's Ethereum address
+                }, { merge: true }); // Use merge to avoid conflicts
+                console.log('Step 3 completed: Created user:', user.username);
+            } catch (error) {
+                console.error('Failed to create user in Firestore (retrying):', error);
+                if (error.message.includes('INTERNAL ASSERTION FAILED')) {
+                    console.warn('Firestore assertion error encountered (suppressed from logs): Retrying with simplified data...');
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    await setDoc(userDocRef, {
+                        username: user.username,
+                        avatar: `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png`,
+                        balance: {
+                            ETH: '0',
+                            USDC: '0',
+                            USDT: '0',
+                            DAI: '0'
+                        },
+                        ethAddress: ''
+                    }, { merge: true });
+                    console.log('Step 3 completed after retry with simplified data: Created user:', user.username);
+                } else {
+                    throw error;
+                }
+            }
+        } else {
+            console.log('Step 3 completed: User exists:', userDoc.data());
+        }
+
+        const sessionToken = generateToken();
+        console.log('Step 4: Generated session token:', sessionToken);
+
+        console.log('Step 5: Saving session to Firestore...');
+        try {
+            await setDoc(doc(db, 'sessions', sessionToken), {
+                userId: user.id,
+                createdAt: serverTimestamp()
+            }, { merge: true });
+            console.log('Step 5 completed: Session token saved to Firestore');
+        } catch (error) {
+            console.error('Failed to save session to Firestore (retrying):', error);
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            await setDoc(doc(db, 'sessions', sessionToken), {
+                userId: user.id,
+                createdAt: serverTimestamp()
+            }, { merge: true });
+            console.log('Step 5 completed after retry: Session token saved to Firestore');
+        }
+
+        const redirectUrl = `/dashboard.html?token=${sessionToken}`;
+        console.log('Step 6: Redirecting to:', redirectUrl);
+        res.redirect(redirectUrl);
+        console.log('Step 6 completed: Redirect sent to client');
+    } catch (error) {
+        console.error('OAuth callback failed at some step:', error.message);
+        if (error.message.includes('INTERNAL ASSERTION FAILED') || error.message.includes('Unexpected state')) {
+            console.warn('Firestore internal error encountered (suppressed from logs): Retrying operation with simplified data...');
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            try {
+                console.log('Retrying OAuth callback...');
+                const tokenDataRetry = await oauth.tokenRequest({
+                    clientId: process.env.DISCORD_CLIENT_ID,
+                    clientSecret: process.env.DISCORD_CLIENT_SECRET,
+                    code,
+                    scope: ['identify', 'email'],
+                    grantType: 'authorization_code',
+                    redirectUri: process.env.DISCORD_REDIRECT_URI,
+                });
+                const userRetry = await oauth.getUser(tokenDataRetry.access_token);
+                const userDocRefRetry = doc(db, 'users', userRetry.id);
+                const userDocRetry = await getDoc(userDocRefRetry);
+                if (!userDocRetry.exists()) {
+                    await setDoc(userDocRefRetry, {
+                        username: userRetry.username,
+                        avatar: `https://cdn.discordapp.com/avatars/${userRetry.id}/${userRetry.avatar}.png`,
+                        balance: {
+                            ETH: '0',
+                            USDC: '0',
+                            USDT: '0',
+                            DAI: '0'
+                        },
+                        ethAddress: ''
+                    }, { merge: true });
+                }
+                const sessionTokenRetry = generateToken();
+                await setDoc(doc(db, 'sessions', sessionTokenRetry), {
+                    userId: userRetry.id,
+                    createdAt: serverTimestamp()
+                }, { merge: true });
+                res.redirect(`/dashboard.html?token=${sessionTokenRetry}`);
+            } catch (retryError) {
+                console.error('Retry failed for OAuth callback:', retryError.message);
+                if (retryError.message.includes('400 Bad Request')) {
+                    console.warn('Discord OAuth 400 Bad Request (suppressed from logs): Verify DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, and DISCORD_REDIRECT_URI in Render Secrets.');
+                }
+                res.status(500).send(`Authentication failed: ${retryError.message}`);
+            }
+        } else if (error.message.includes('400 Bad Request')) {
+            console.warn('Discord OAuth 400 Bad Request (suppressed from logs): Verify DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, and DISCORD_REDIRECT_URI in Render Secrets.');
+            res.status(500).send(`Authentication failed: ${error.message}`);
+        } else {
+            res.status(500).send(`Authentication failed: ${error.message}`);
+        }
+    }
 });
 
 app.post('/api/user', authenticateToken, async (req, res) => {
@@ -362,7 +527,7 @@ async function tradingBot() {
                                 botBalance.ETH -= amount;
                                 const profit = (sellPrice - buyPrice) * ethers.formatEther(amount);
                                 updateBotBalance('ETH', profit, priceData);
-                                console.log(`Arbitrage trade executed: Bought  ${ethers.formatEther(amount)} ETH at $${buyPrice.toFixed(2)} from ${exchanges[i]}, sold at $${sellPrice.toFixed(2)} to ${exchanges[j]} on Ethereum Mainnet, profit: $${profit.toFixed(2)}`);
+                                console.log(`Arbitrage trade executed: Bought ${ethers.formatEther(amount)} ETH at $${buyPrice.toFixed(2)} from ${exchanges[i]}, sold at $${sellPrice.toFixed(2)} to ${exchanges[j]} on Ethereum Mainnet, profit: $${profit.toFixed(2)}`);
                                 io.emit('trade', { type: 'profit', amount: ethers.formatEther(amount), profit: profit.toFixed(2), currency: 'ETH', network: 'Ethereum Mainnet' });
                                 return true;
                             }
@@ -539,13 +704,13 @@ async function executeTrade(type, fromCurrency, amount, price, exchange, strateg
 
         if (type === 'buy' && fromCurrency === 'ETH') {
             const tx = await wallet.sendTransaction({
-                to: botWalletAddress, // Buy into bot wallet
+                to: await wallet.getAddress(), // Buy into bot wallet
                 value: amountInWei
             });
             console.log(`${type} ${ethers.formatEther(amount)} ${fromCurrency} at $${price.toFixed(2)} from ${exchange} on Ethereum Mainnet, TX: ${tx.hash}`);
         } else if (type === 'sell' && fromCurrency === 'ETH') {
             const tx = await wallet.sendTransaction({
-                to: botWalletAddress, // Sell from bot wallet (simplified, adjust for exchange)
+                to: await wallet.getAddress(), // Sell from bot wallet (simplified, adjust for exchange)
                 value: amountInWei
             });
             console.log(`${type} ${ethers.formatEther(amount)} ${fromCurrency} at $${price.toFixed(2)} to ${exchange} on Ethereum Mainnet, TX: ${tx.hash}`);
@@ -569,7 +734,7 @@ async function executeTrade(type, fromCurrency, amount, price, exchange, strateg
                 const tx = await uniswapContract.swapExactETHForTokens(
                     toAmount,
                     path,
-                    botWalletAddress,
+                    await wallet.getAddress(),
                     Math.floor(Date.now() / 1000) + 60 * 20, // 20 minutes from now
                     { value: amountInWei }
                 );
@@ -587,7 +752,7 @@ async function executeTrade(type, fromCurrency, amount, price, exchange, strateg
                         amountInWei,
                         toAmount,
                         path,
-                        botWalletAddress,
+                        await wallet.getAddress(),
                         Math.floor(Date.now() / 1000) + 60 * 20 // 20 minutes from now
                     );
                 } else {
@@ -595,7 +760,7 @@ async function executeTrade(type, fromCurrency, amount, price, exchange, strateg
                         amountInWei,
                         toAmount,
                         path,
-                        botWalletAddress,
+                        await wallet.getAddress(),
                         Math.floor(Date.now() / 1000) + 60 * 20 // 20 minutes from now
                     );
                 }
@@ -607,7 +772,7 @@ async function executeTrade(type, fromCurrency, amount, price, exchange, strateg
         if (error.code === 'INSUFFICIENT_FUNDS') {
             console.warn('Insufficient funds in bot wallet on Ethereum Mainnet (suppressed from logs): Refilling or skipping trade...');
             botBalance.ETH = BigInt('1000000000000000000'); // Reset to 1 ETH if funds run low
-            await updateBotBalanceInFirestore(botWalletAddress, botBalance);
+            await updateBotBalanceInFirestore(await wallet.getAddress(), botBalance);
         }
     }
 }
@@ -629,7 +794,7 @@ function updateBotBalance(currency, profit, priceData) {
     } else if (currency === 'DAI') {
         botBalance.DAI = (botBalance.DAI + ethers.parseEther(profit.toString())).toString();
     }
-    updateBotBalanceInFirestore(botWalletAddress, botBalance);
+    updateBotBalanceInFirestore(await wallet.getAddress(), botBalance);
 }
 
 const PORT = process.env.PORT || 3000;
