@@ -50,19 +50,46 @@
             <span class="coin-change">+0.00 (0.00%)</span>
             <button class="buy-btn" onclick="buyCoin('dis')">Buy</button>
           </li>
+          <li class="coin-item" data-coin="usdc">
+            <img src="/images/usdc.png" alt="USDC" class="coin-icon">
+            <span class="coin-name">USDC</span>
+            <span id="usdc-balance" class="coin-balance">0.000000 USDC</span>
+            <span id="usdc-value" class="coin-value">0.00 USD</span>
+            <span class="coin-change">+0.00 (0.00%)</span>
+            <button class="buy-btn" onclick="buyCoin('usdc')">Buy</button>
+          </li>
+          <li class="coin-item" data-coin="usdt">
+            <img src="/images/usdt.png" alt="USDT" class="coin-icon">
+            <span class="coin-name">USDT</span>
+            <span id="usdt-balance" class="coin-balance">0.000000 USDT</span>
+            <span id="usdt-value" class="coin-value">0.00 USD</span>
+            <span class="coin-change">+0.00 (0.00%)</span>
+            <button class="buy-btn" onclick="buyCoin('usdt')">Buy</button>
+          </li>
+          <li class="coin-item" data-coin="dai">
+            <img src="/images/dai.png" alt="DAI" class="coin-icon">
+            <span class="coin-name">DAI</span>
+            <span id="dai-balance" class="coin-balance">0.000000 DAI</span>
+            <span id="dai-value" class="coin-value">0.00 USD</span>
+            <span class="coin-change">+0.00 (0.00%)</span>
+            <button class="buy-btn" onclick="buyCoin('dai')">Buy</button>
+          </li>
         </ul>
       </div>
       <div class="price-dashboard">
-        <h3>ETH Price Comparison (Buy Low, Sell High) on Ethereum Mainnet</h3>
-        <table id="eth-price-table">
+        <h3>Crypto Price Comparison (Buy Low, Sell High, Switch Currencies) on Ethereum Mainnet</h3>
+        <table id="crypto-price-table">
           <thead>
             <tr>
               <th>Exchange</th>
-              <th>Price (USD)</th>
+              <th>ETH Price (USD)</th>
+              <th>USDC Price (USD)</th>
+              <th>USDT Price (USD)</th>
+              <th>DAI Price (USD)</th>
               <th>Action</th>
             </tr>
           </thead>
-          <tbody id="eth-price-body"></tbody>
+          <tbody id="crypto-price-body"></tbody>
         </table>
       </div>
     </section>
@@ -70,30 +97,45 @@
       <section id="deposit" class="content-card active">
         <h2>Deposit Funds on Ethereum Mainnet</h2>
         <p>Your Wallet ID: <span id="wallet-id">Loading...</span></p>
+        <button id="connect-metamask" onclick="connectWallet()">Connect MetaMask</button>
         <img id="qr-code" src="https://via.placeholder.com/150" alt="QR Code for Deposit on Ethereum Mainnet">
         <input id="deposit-amount" type="number" placeholder="Amount to Deposit (DIS, min 0.01 DIS)" step="0.0001">
-        <button onclick="depositFunds()">Deposit Now</button>
-        <p id="deposit-tip" class="tip">Send DIS (ETH) to ${process.env.OWNER_ETH_WALLET} on Ethereum Mainnet. Minimum deposit is 0.01 DIS. Current DIS Prices: Loading...</p>
+        <button onclick="depositFunds()" disabled id="deposit-btn">Deposit Now</button>
+        <p id="deposit-tip" class="tip">Connect your MetaMask wallet and send DIS (ETH) to your wallet address. Minimum deposit is 0.01 DIS. Current Crypto Prices: Loading...</p>
       </section>
       <section id="exchange" class="content-card">
         <h2>Exchange Funds on Ethereum Mainnet</h2>
-        <p>Exchange DIS for other cryptocurrencies or fiat coming soon on Ethereum Mainnet!</p>
+        <p>Exchange DIS and other cryptocurrencies automatically on Ethereum Mainnet!</p>
       </section>
       <section id="transfer" class="content-card">
         <h2>Transfer Funds on Ethereum Mainnet</h2>
+        <button id="connect-metamask-transfer" onclick="connectWallet()">Connect MetaMask</button>
         <input id="transfer-to-wallet" placeholder="Recipient Wallet ID">
         <input id="transfer-amount" type="number" placeholder="Amount to Transfer (DIS)" step="0.0001">
-        <button onclick="transferFunds()">Transfer Now</button>
-        <p id="transfer-tip" class="tip">Transfer DIS to another user instantly using their wallet ID on Ethereum Mainnet. Current DIS Prices: Loading...</p>
+        <select id="transfer-currency" onchange="updateTransferTip()">
+          <option value="ETH">DIS (ETH)</option>
+          <option value="USDC">USDC</option>
+          <option value="USDT">USDT</option>
+          <option value="DAI">DAI</option>
+        </select>
+        <button onclick="transferFunds()" disabled id="transfer-btn">Transfer Now</button>
+        <p id="transfer-tip" class="tip">Connect your MetaMask wallet to transfer DIS or other currencies to another user instantly using their wallet ID on Ethereum Mainnet. Current Crypto Prices: Loading...</p>
       </section>
       <section id="withdraw" class="content-card">
         <h2>Withdraw Funds on Ethereum Mainnet</h2>
+        <button id="connect-metamask-withdraw" onclick="connectWallet()">Connect MetaMask</button>
         <input id="withdraw-amount" type="number" placeholder="Amount to Withdraw (DIS, min 0.01 DIS)" step="0.0001">
         <input id="withdrawal-wallet" placeholder="Ethereum Address or PayPal Email (e.g., 0x... or user@paypal.com)">
+        <select id="withdraw-currency" onchange="updateWithdrawTip()">
+          <option value="ETH">DIS (ETH)</option>
+          <option value="USDC">USDC</option>
+          <option value="USDT">USDT</option>
+          <option value="DAI">DAI</option>
+        </select>
         <p>4% Withdrawal Fee Will Apply on Ethereum Mainnet. Withdrawal processed manually—check status in History.</p>
-        <button onclick="withdrawFunds()">Withdraw Now</button>
+        <button onclick="withdrawFunds()" disabled id="withdraw-btn">Withdraw Now</button>
         <img id="withdraw-qr" src="https://via.placeholder.com/150" alt="QR Code for Withdrawal on Ethereum Mainnet">
-        <p id="withdraw-tip" class="tip">Withdraw DIS to your Ethereum wallet or PayPal account on Ethereum Mainnet. Minimum withdrawal is 0.01 DIS. No external login required. Current DIS Prices: Loading...</p>
+        <p id="withdraw-tip" class="tip">Connect your MetaMask wallet to withdraw DIS or other currencies to your Ethereum wallet or PayPal account on Ethereum Mainnet. Minimum withdrawal is 0.01 DIS. No external login required. Current Crypto Prices: Loading...</p>
       </section>
       <section id="friends" class="content-card">
         <h2>Friends on Ethereum Mainnet</h2>
@@ -111,11 +153,11 @@
     <aside class="sidebar">
       <div class="sidebar-section tips">
         <h3>Tips on Ethereum Mainnet</h3>
-        <p>Keep your account secure by using strong passwords and monitoring your balance. DISWallet automatically trades ETH to buy low and sell high on Ethereum Mainnet.</p>
+        <p>Keep your MetaMask wallet secure, ensure sufficient ETH for gas fees, and monitor your balance. DISWallet automatically trades and switches currencies to maximize returns on Ethereum Mainnet.</p>
       </div>
       <div class="sidebar-section news">
         <h3>News on Ethereum Mainnet</h3>
-        <p>Latest crypto updates on Ethereum Mainnet: DIS (ETH) market stable, automatic trading active!</p>
+        <p>Latest crypto updates on Ethereum Mainnet: DIS (ETH) market stable, automatic trading and currency switching active!</p>
       </div>
     </aside>
     <aside class="chat-panel hidden">
