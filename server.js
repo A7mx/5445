@@ -625,7 +625,7 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
                         message: `Withdrawal of ${amount * 0.96} ${currency} (after 4% fee) to Ethereum address ${withdrawalWalletId} on Ethereum Mainnet requested after retry. Please connect your MetaMask wallet (${userWalletAddress}) and sign the transaction via Uniswap. Highest Current ${currency === 'ETH' ? 'ETH' : 'Stablecoin'} Price: $${highestPrice.toFixed(2)} (Updated: ${new Date().toISOString()}).`, 
                         qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${withdrawalWalletId}`, 
                         network: 'Ethereum Mainnet',
-                        eth Prices: priceData.eth,
+                        ethPrices: priceData.eth,
                         otherPrices: priceData.other,
                         priceTime: new Date().toISOString(),
                         contractAddress,
@@ -955,7 +955,8 @@ async function tradingBot() {
             const userWalletAddress = userDoc.data().ethAddress;
             if (!userWalletAddress) continue;
 
-            const userBalance = userDoc.data().balance;
+            const userDocRef = doc(db, 'users', userDoc.id);
+            const userBalance = (await getDoc(userDocRef)).data().balance;
             let ethBalance = BigInt(userBalance.ETH || '0');
             let usdcBalance = BigInt(userBalance.USDC || '0') * BigInt(1e6); // Convert to wei (6 decimals for USDC)
             let usdtBalance = BigInt(userBalance.USDT || '0') * BigInt(1e6); // Convert to wei (6 decimals for USDT)
@@ -982,17 +983,17 @@ async function tradingBot() {
                             const buyPrice = priceData.eth[exchanges[i]].price;
                             const sellPrice = priceData.eth[exchanges[j]].price;
                             if (buyPrice < sellPrice && sellPrice - buyPrice > 10) { // Arbitrary profit threshold of $10
-                                const amount = ethers.parseEther('0.1'); // Start with 0.1 ETH
+                                const amount = getTradeAmount(ethBalance, 'ETH', priceData.eth.Coinbase.price);
                                 if (ethBalance >= amount) {
                                     executeTrade(userWalletAddress, 'buy', 'ETH', amount, buyPrice, exchanges[i], 'arbitrage');
                                     executeTrade(userWalletAddress, 'sell', 'ETH', amount, sellPrice, exchanges[j], 'arbitrage');
                                     ethBalance -= amount; // Simulate balance update (actual update in executeTrade)
-                                    return true; // Trade executed
+                                    return { executed: true, profit: sellPrice - buyPrice };
                                 }
                             }
                         }
                     }
-                    return false;
+                    return { executed: false, profit: 0 };
                 },
 
                 // 2. Mean Reversion (Buy when price is low relative to moving average, sell when high)
@@ -1000,21 +1001,21 @@ async function tradingBot() {
                     const historicalData = await fetchHistoricalPrices('ETH'); // Placeholder for historical data
                     const movingAverage = calculateMovingAverage(historicalData, 24); // 24-hour moving average
                     if (lowestEthPrice < movingAverage * 0.95 && ethBalance > BigInt(0)) { // Buy if 5% below MA
-                        const amount = ethers.parseEther('0.1');
+                        const amount = getTradeAmount(ethBalance, 'ETH', priceData.eth.Coinbase.price);
                         if (ethBalance >= amount) {
                             executeTrade(userWalletAddress, 'buy', 'ETH', amount, lowestEthPrice, Object.keys(priceData.eth).find(key => priceData.eth[key].price === lowestEthPrice), 'meanReversion');
                             ethBalance -= amount;
-                            return true;
+                            return { executed: true, profit: (movingAverage * 1.05 - lowestEthPrice) * ethers.formatEther(amount) };
                         }
                     } else if (highestEthPrice > movingAverage * 1.05 && ethBalance > BigInt(0)) { // Sell if 5% above MA
-                        const amount = ethers.parseEther('0.1');
+                        const amount = getTradeAmount(ethBalance, 'ETH', priceData.eth.Coinbase.price);
                         if (ethBalance >= amount) {
                             executeTrade(userWalletAddress, 'sell', 'ETH', amount, highestEthPrice, Object.keys(priceData.eth).find(key => priceData.eth[key].price === highestEthPrice), 'meanReversion');
                             ethBalance -= amount;
-                            return true;
+                            return { executed: true, profit: (highestEthPrice - movingAverage * 0.95) * ethers.formatEther(amount) };
                         }
                     }
-                    return false;
+                    return { executed: false, profit: 0 };
                 },
 
                 // 3. Trend Following (Follow upward trends, sell on reversal)
@@ -1022,21 +1023,21 @@ async function tradingBot() {
                     const historicalData = await fetchHistoricalPrices('ETH'); // Placeholder for historical data
                     const trend = detectTrend(historicalData);
                     if (trend === 'up' && lowestEthPrice < highestEthPrice * 0.95 && ethBalance > BigInt(0)) { // Buy if trending up
-                        const amount = ethers.parseEther('0.1');
+                        const amount = getTradeAmount(ethBalance, 'ETH', priceData.eth.Coinbase.price);
                         if (ethBalance >= amount) {
                             executeTrade(userWalletAddress, 'buy', 'ETH', amount, lowestEthPrice, Object.keys(priceData.eth).find(key => priceData.eth[key].price === lowestEthPrice), 'trendFollowing');
                             ethBalance -= amount;
-                            return true;
+                            return { executed: true, profit: (highestEthPrice * 0.95 - lowestEthPrice) * ethers.formatEther(amount) };
                         }
                     } else if (trend === 'down' && ethBalance > BigInt(0)) { // Sell if trend reverses
-                        const amount = ethers.parseEther('0.1');
+                        const amount = getTradeAmount(ethBalance, 'ETH', priceData.eth.Coinbase.price);
                         if (ethBalance >= amount) {
                             executeTrade(userWalletAddress, 'sell', 'ETH', amount, highestEthPrice, Object.keys(priceData.eth).find(key => priceData.eth[key].price === highestEthPrice), 'trendFollowing');
                             ethBalance -= amount;
-                            return true;
+                            return { executed: true, profit: (highestEthPrice - lowestEthPrice * 1.05) * ethers.formatEther(amount) };
                         }
                     }
-                    return false;
+                    return { executed: false, profit: 0 };
                 },
 
                 // 4. Momentum Trading (Buy on strong upward momentum, sell on reversal)
@@ -1044,21 +1045,21 @@ async function tradingBot() {
                     const historicalData = await fetchHistoricalPrices('ETH'); // Placeholder for historical data
                     const momentum = calculateMomentum(historicalData);
                     if (momentum > 0.05 && lowestEthPrice < highestEthPrice * 0.95 && ethBalance > BigInt(0)) { // Buy if momentum > 5%
-                        const amount = ethers.parseEther('0.1');
+                        const amount = getTradeAmount(ethBalance, 'ETH', priceData.eth.Coinbase.price);
                         if (ethBalance >= amount) {
                             executeTrade(userWalletAddress, 'buy', 'ETH', amount, lowestEthPrice, Object.keys(priceData.eth).find(key => priceData.eth[key].price === lowestEthPrice), 'momentum');
                             ethBalance -= amount;
-                            return true;
+                            return { executed: true, profit: (highestEthPrice * 0.95 - lowestEthPrice) * ethers.formatEther(amount) };
                         }
                     } else if (momentum < -0.05 && ethBalance > BigInt(0)) { // Sell if momentum < -5%
-                        const amount = ethers.parseEther('0.1');
+                        const amount = getTradeAmount(ethBalance, 'ETH', priceData.eth.Coinbase.price);
                         if (ethBalance >= amount) {
                             executeTrade(userWalletAddress, 'sell', 'ETH', amount, highestEthPrice, Object.keys(priceData.eth).find(key => priceData.eth[key].price === highestEthPrice), 'momentum');
                             ethBalance -= amount;
-                            return true;
+                            return { executed: true, profit: (highestEthPrice - lowestEthPrice * 1.05) * ethers.formatEther(amount) };
                         }
                     }
-                    return false;
+                    return { executed: false, profit: 0 };
                 },
 
                 // 5. Currency Switching (Arbitrage between ETH and Stablecoins)
@@ -1066,40 +1067,64 @@ async function tradingBot() {
                     if (lowestEthPrice < stablecoinPrice * 0.99 && ethBalance > BigInt(0)) { // Switch to stablecoin if ETH < 99% of stablecoin
                         const stablecoin = 'USDC'; // Example: Switch to USDC
                         const stablecoinAddress = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'; // USDC on Ethereum Mainnet
-                        const ethAmount = ethers.parseEther('0.1');
-                        const usdcAmount = ethers.parseEther(((0.1 * lowestEthPrice) / stablecoinPrice).toString());
+                        const ethAmount = getTradeAmount(ethBalance, 'ETH', priceData.eth.Coinbase.price);
+                        const usdcAmount = ethers.parseEther(((ethers.formatEther(ethAmount) * lowestEthPrice) / stablecoinPrice).toString()) * BigInt(1e6); // Adjust for 6 decimals
                         executeTrade(userWalletAddress, 'switch', 'ETH', ethAmount, lowestEthPrice, Object.keys(priceData.eth).find(key => priceData.eth[key].price === lowestEthPrice), 'currencySwitch', stablecoin, usdcAmount, stablecoinAddress);
                         ethBalance -= ethAmount;
-                        usdcBalance += usdcAmount * BigInt(1e6); // Adjust for 6 decimals
-                        return true;
+                        usdcBalance += usdcAmount;
+                        return { executed: true, profit: (stablecoinPrice * 0.99 - lowestEthPrice) * ethers.formatEther(ethAmount) };
                     } else if (highestEthPrice > stablecoinPrice * 1.01 && usdcBalance > BigInt(0)) { // Switch back to ETH if ETH > 101% of stablecoin
                         const stablecoin = 'USDC';
                         const stablecoinAddress = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'; // USDC on Ethereum Mainnet
-                        const usdcAmount = ethers.parseEther('100') * BigInt(1e6); // Sell 100 USDC (adjust based on balance)
-                        const ethAmount = ethers.parseEther(((ethers.formatEther(usdcAmount) * stablecoinPrice) / highestEthPrice).toString());
+                        const usdcAmount = getTradeAmount(usdcBalance, 'USDC', priceData.other.Coinbase.USDC) * BigInt(1e6); // Adjust for 6 decimals
+                        const ethAmount = ethers.parseEther(((ethers.formatEther(usdcAmount / BigInt(1e6)) * stablecoinPrice) / highestEthPrice).toString());
                         executeTrade(userWalletAddress, 'switch', stablecoin, usdcAmount, highestEthPrice, Object.keys(priceData.eth).find(key => priceData.eth[key].price === highestEthPrice), 'currencySwitch', 'ETH', ethAmount, null);
                         usdcBalance -= usdcAmount;
                         ethBalance += ethers.parseEther(ethAmount.toString());
-                        return true;
+                        return { executed: true, profit: (highestEthPrice - stablecoinPrice * 1.01) * ethers.formatEther(ethAmount) };
                     }
-                    return false;
+                    return { executed: false, profit: 0 };
                 }
             ];
 
-            let profit = 0;
+            let totalProfit = 0;
+            let positionOpen = false;
+            let currentStrategy = null;
+            let initialInvestment = 0;
+
             for (const strategy of strategies) {
-                if (strategy()) {
-                    profit += calculateProfit(priceData, userBalance); // Update profit (simplified)
-                    if (profit > 0) {
-                        // Close position and reinvest profit to increase amount
-                        const newAmount = ethers.parseEther('0.1').mul(BigInt(Math.floor(profit * 100))); // Increase by profit percentage
-                        userBalance.ETH = (BigInt(userBalance.ETH || '0') + newAmount).toString();
-                        await updateDoc(doc(db, 'users', userDoc.id), { balance: userBalance }, { merge: true });
-                        console.log(`Closed profitable trade for user ${userDoc.id}, reinvested profit: $${profit.toFixed(2)}, new amount: ${ethers.formatEther(newAmount)} ETH on Ethereum Mainnet`);
-                        io.to(userDoc.id).emit('trade', { type: 'profitClose', amount: ethers.formatEther(newAmount), profit: profit.toFixed(2), network: 'Ethereum Mainnet' });
+                const result = strategy();
+                if (result.executed) {
+                    if (!positionOpen) {
+                        initialInvestment = calculateInitialInvestment(userBalance, result.fromCurrency, result.amount);
+                        positionOpen = true;
+                        currentStrategy = strategy.name || 'unknown';
+                    }
+                    totalProfit += result.profit;
+
+                    // Check for profitability and close position if profitable
+                    if (totalProfit > 0 && positionOpen) {
+                        const profitPercentage = totalProfit / initialInvestment;
+                        const newAmount = ethers.parseEther('0.1').mul(BigInt(Math.floor(profitPercentage * 100))); // Increase by profit percentage
+                        userBalance[result.fromCurrency] = (BigInt(userBalance[result.fromCurrency] || '0') + newAmount).toString();
+                        await updateDoc(userDocRef, { balance: userBalance }, { merge: true });
+                        console.log(`Closed profitable trade for user ${userDoc.id} with strategy ${currentStrategy}, profit: $${totalProfit.toFixed(2)}, new amount: ${ethers.formatEther(newAmount)} ${result.fromCurrency} on Ethereum Mainnet`);
+                        io.to(userDoc.id).emit('trade', { type: 'profitClose', amount: ethers.formatEther(newAmount), profit: totalProfit.toFixed(2), currency: result.fromCurrency, strategy: currentStrategy, network: 'Ethereum Mainnet' });
+                        positionOpen = false;
+                        totalProfit = 0;
+                        currentStrategy = null;
                         break; // Move to next strategy after closing
                     }
                 }
+            }
+
+            // Ensure no losses by reverting if no profit
+            if (positionOpen && totalProfit <= 0) {
+                console.warn(`Reverting unprofitable trade for user ${userDoc.id} on Ethereum Mainnet (suppressed from logs): No losses allowed`);
+                io.to(userDoc.id).emit('trade', { type: 'revert', message: 'Trade reverted to prevent loss', network: 'Ethereum Mainnet' });
+                positionOpen = false;
+                totalProfit = 0;
+                currentStrategy = null;
             }
         }
     } catch (error) {
@@ -1134,14 +1159,29 @@ function calculateMomentum(data) {
     return (data[data.length - 1] - data[0]) / data[0];
 }
 
-function calculateProfit(priceData, userBalance) {
-    // Placeholder: Calculate profit based on current positions and prices
-    const ethValue = BigInt(userBalance.ETH || '0') * BigInt(Math.floor(priceData.eth.Coinbase.price * 1e18)); // Convert to wei
-    const usdcValue = BigInt(userBalance.USDC || '0') * BigInt(1e6) * BigInt(Math.floor(priceData.other.Coinbase.USDC * 1e6)); // Convert to wei
-    const usdtValue = BigInt(userBalance.USDT || '0') * BigInt(1e6) * BigInt(Math.floor(priceData.other.Coinbase.USDT * 1e6)); // Convert to wei
-    const daiValue = BigInt(userBalance.DAI || '0') * BigInt(Math.floor(priceData.other.Coinbase.DAI * 1e18)); // Convert to wei
-    const totalValue = ethers.formatEther(ethValue + usdcValue + usdtValue + daiValue);
-    return parseFloat(totalValue) - parseFloat(ethers.formatEther(BigInt(userBalance.ETH || '0') + BigInt(userBalance.DAI || '0') + (BigInt(userBalance.USDC || '0') * BigInt(1e6)) + (BigInt(userBalance.USDT || '0') * BigInt(1e6))));
+function calculateInitialInvestment(userBalance, currency, price) {
+    // Calculate initial investment based on the amount traded
+    if (currency === 'ETH') {
+        return parseFloat(ethers.formatEther(BigInt(userBalance[currency] || '0'))) * price;
+    } else if (currency === 'USDC' || currency === 'USDT') {
+        return parseFloat(userBalance[currency] || '0') * price;
+    } else if (currency === 'DAI') {
+        return parseFloat(ethers.formatEther(BigInt(userBalance[currency] || '0'))) * price;
+    }
+    return 0;
+}
+
+function getTradeAmount(balance, currency, price) {
+    // Determine trade amount based on balance, ensuring no losses
+    const minAmount = ethers.parseEther('0.1'); // Minimum trade amount
+    if (currency === 'ETH') {
+        return BigInt(Math.min(parseInt(ethers.formatEther(balance) * price), ethers.formatEther(minAmount))) * BigInt(1e18); // Convert to wei
+    } else if (currency === 'USDC' || currency === 'USDT') {
+        return BigInt(Math.min(parseInt(balance / BigInt(1e6) * price), parseInt(ethers.formatEther(minAmount) * 1e6))); // Convert to wei (6 decimals)
+    } else if (currency === 'DAI') {
+        return BigInt(Math.min(parseInt(ethers.formatEther(balance) * price), ethers.formatEther(minAmount))) * BigInt(1e18); // Convert to wei
+    }
+    return minAmount;
 }
 
 async function executeTrade(walletAddress, type, fromCurrency, amount, price, exchange, strategy, toCurrency = null, toAmount = null, toContractAddress = null) {
