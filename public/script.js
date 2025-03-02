@@ -176,47 +176,55 @@ function deposit() {
   showSection('deposit');
 }
 
-async function connectWallet() {
-  if (typeof window.ethereum !== 'undefined') {
-    // MetaMask connection (browser)
+async function connectWallet(retries = 3, delay = 1000) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-      userWalletAddress = accounts[0];
-      console.log('Connected MetaMask wallet on Ethereum Mainnet:', userWalletAddress);
-      document.getElementById('connect-metamask').textContent = 'Wallet Connected: ' + truncateAddress(userWalletAddress);
-      document.getElementById('connect-metamask-withdraw').textContent = 'Wallet Connected: ' + truncateAddress(userWalletAddress);
-      document.getElementById('connect-metamask-transfer').textContent = 'Wallet Connected: ' + truncateAddress(userWalletAddress);
-      document.getElementById('deposit-btn').disabled = false;
-      document.getElementById('withdraw-btn').disabled = false;
-      document.getElementById('transfer-btn').disabled = false;
-      await fetchWithToken('/api/connect-wallet', { method: 'POST', body: { userWalletAddress } });
-      refreshUserData(); // Update user data with wallet address
+      if (typeof window.ethereum !== 'undefined') {
+        // Check if MetaMask is on Ethereum Mainnet (chain ID 1)
+        const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+        if (chainId !== '0x1') { // Ethereum Mainnet chain ID is 1 (0x1 in hex)
+          try {
+            await window.ethereum.request({
+              method: 'wallet_switchEthereumChain',
+              params: [{ chainId: '0x1' }],
+            });
+          } catch (switchError) {
+            if (switchError.code === 4902) { // Chain not added
+              await window.ethereum.request({
+                method: 'wallet_addEthereumChain',
+                params: [{ chainId: '0x1', chainName: 'Ethereum Mainnet', rpcUrls: ['https://mainnet.infura.io/v3/6b844349c9964e1395b79d8a39cc6d44'] }],
+              });
+            } else {
+              throw new Error('Failed to switch to Ethereum Mainnet: ' + switchError.message);
+            }
+          }
+        }
+
+        // Request MetaMask account access
+        const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+        userWalletAddress = accounts[0];
+        console.log('Connected MetaMask wallet on Ethereum Mainnet:', userWalletAddress);
+        document.getElementById('connect-metamask').textContent = 'Wallet Connected: ' + truncateAddress(userWalletAddress);
+        document.getElementById('connect-metamask-withdraw').textContent = 'Wallet Connected: ' + truncateAddress(userWalletAddress);
+        document.getElementById('connect-metamask-transfer').textContent = 'Wallet Connected: ' + truncateAddress(userWalletAddress);
+        document.getElementById('deposit-btn').disabled = false;
+        document.getElementById('withdraw-btn').disabled = false;
+        document.getElementById('transfer-btn').disabled = false;
+        await fetchWithToken('/api/connect-wallet', { method: 'POST', body: { userWalletAddress } });
+        refreshUserData(); // Update user data with wallet address
+        return; // Exit loop on success
+      } else {
+        throw new Error('MetaMask not installed on Ethereum Mainnet.');
+      }
     } catch (error) {
-      console.error('Failed to connect MetaMask on Ethereum Mainnet:', error);
-      showError('Failed to connect MetaMask on Ethereum Mainnet: Please try again.');
-    }
-  } else {
-    // WalletConnect for mobile wallets (e.g., Trust Wallet)
-    try {
-      const Web3Provider = window.Web3Provider || (await import('@walletconnect/web3-provider')).default;
-      const provider = new Web3Provider({
-        infuraId: '6b844349c9964e1395b79d8a39cc6d44', // Use your Infura project ID
-      });
-      await provider.enable();
-      const accounts = await provider.listAccounts();
-      userWalletAddress = accounts[0];
-      console.log('Connected WalletConnect wallet on Ethereum Mainnet:', userWalletAddress);
-      document.getElementById('connect-metamask').textContent = 'Wallet Connected: ' + truncateAddress(userWalletAddress);
-      document.getElementById('connect-metamask-withdraw').textContent = 'Wallet Connected: ' + truncateAddress(userWalletAddress);
-      document.getElementById('connect-metamask-transfer').textContent = 'Wallet Connected: ' + truncateAddress(userWalletAddress);
-      document.getElementById('deposit-btn').disabled = false;
-      document.getElementById('withdraw-btn').disabled = false;
-      document.getElementById('transfer-btn').disabled = false;
-      await fetchWithToken('/api/connect-wallet', { method: 'POST', body: { userWalletAddress } });
-      refreshUserData(); // Update user data with wallet address
-    } catch (error) {
-      console.error('Failed to connect WalletConnect on Ethereum Mainnet:', error);
-      showError('Failed to connect WalletConnect on Ethereum Mainnet: Please install Trust Wallet or try again.');
+      if (attempt === retries) {
+        console.error('Failed to connect MetaMask on Ethereum Mainnet after retries:', error);
+        showError('Failed to connect MetaMask on Ethereum Mainnet: Please ensure MetaMask is installed, set to Ethereum Mainnet, and try again.');
+        return;
+      }
+      console.warn(`Attempt ${attempt} failed to connect MetaMask on Ethereum Mainnet (retrying in ${delay}ms):`, error.message);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      delay *= 2; // Exponential backoff
     }
   }
 }
