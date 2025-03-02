@@ -347,14 +347,15 @@ app.get('/api/owner-wallet', (req, res) => {
 });
 
 app.post('/api/pending-deposit', authenticateToken, async (req, res) => {
-    const { userId, amount, userWalletAddress, timestamp, status } = req.body;
+    const { userId, amount, userWalletAddress, timestamp, status, currency } = req.body;
     try {
         await setDoc(doc(collection(db, 'deposits'), `${userId}_${Date.now()}`), {
             userId,
-            amount: ethers.parseEther(amount.toString()), // Store amount in wei for ETH
+            amount: currency === 'ETH' ? ethers.parseEther(amount.toString()) : amount.toString(), // Store ETH in wei, others as strings
             userWalletAddress, // User's wallet address for monitoring
             timestamp,
             status,
+            currency,
             network: 'Ethereum Mainnet'
         }, { merge: true });
         res.json({ success: true, message: 'Deposit request logged on Ethereum Mainnet' });
@@ -365,7 +366,7 @@ app.post('/api/pending-deposit', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/deposit', authenticateToken, async (req, res) => {
-    const { amount, userWalletAddress } = req.body; // Removed verificationCode
+    const { amount, userWalletAddress, currency } = req.body; // Removed verificationCode
     if (!amount || amount <= 0 || amount < 0.01) return res.status(400).json({ error: 'Invalid deposit amount (minimum 0.01 ETH)' });
     if (!userWalletAddress || !ethers.isAddress(userWalletAddress)) return res.status(400).json({ error: 'Invalid Ethereum wallet address' });
     try {
@@ -373,17 +374,18 @@ app.post('/api/deposit', authenticateToken, async (req, res) => {
         try {
             await setDoc(doc(collection(db, 'deposits'), `${req.user.userId}_${Date.now()}`), {
                 userId: req.user.userId,
-                amount: ethers.parseEther(amount.toString()), // Store amount in wei for ETH
+                amount: currency === 'ETH' ? ethers.parseEther(amount.toString()) : amount.toString(), // Store ETH in wei, others as strings
                 userWalletAddress, // Store the user's wallet address for monitoring
                 timestamp: new Date().toISOString(),
                 status: 'pending',
+                currency,
                 network: 'Ethereum Mainnet'
             }, { merge: true });
             const priceData = await getCryptoPrices();
-            const lowestEthPrice = Math.min(...Object.values(priceData.eth).map(p => p.price || 3000.00));
+            const lowestPrice = Math.min(...Object.values(priceData.eth).map(p => p.price || 3000.00));
             res.json({ 
                 success: true, 
-                message: `Deposit of ${amount} ETH requested on Ethereum Mainnet. Please send ${amount} ETH from your MetaMask wallet (${userWalletAddress}) and await confirmation. Lowest Current ETH Price: $${lowestEthPrice.toFixed(2)} (Updated: ${new Date().toISOString()}).`, 
+                message: `Deposit of ${amount} ${currency} requested on Ethereum Mainnet. Please send ${amount} ${currency} from your MetaMask wallet (${userWalletAddress}) and await confirmation. Lowest Current ${currency === 'ETH' ? 'ETH' : 'Stablecoin'} Price: $${lowestPrice.toFixed(2)} (Updated: ${new Date().toISOString()}).`, 
                 network: 'Ethereum Mainnet',
                 ethPrices: priceData.eth,
                 otherPrices: priceData.other,
@@ -394,17 +396,18 @@ app.post('/api/deposit', authenticateToken, async (req, res) => {
             await new Promise(resolve => setTimeout(resolve, 1000));
             await setDoc(doc(collection(db, 'deposits'), `${req.user.userId}_${Date.now()}`), {
                 userId: req.user.userId,
-                amount: ethers.parseEther(amount.toString()),
+                amount: currency === 'ETH' ? ethers.parseEther(amount.toString()) : amount.toString(),
                 userWalletAddress,
                 timestamp: new Date().toISOString(),
                 status: 'pending',
+                currency,
                 network: 'Ethereum Mainnet'
             }, { merge: true });
             const priceData = await getCryptoPrices();
-            const lowestEthPrice = Math.min(...Object.values(priceData.eth).map(p => p.price || 3000.00));
+            const lowestPrice = Math.min(...Object.values(priceData.eth).map(p => p.price || 3000.00));
             res.json({ 
                 success: true, 
-                message: `Deposit of ${amount} ETH requested on Ethereum Mainnet after retry. Please send ${amount} ETH from your MetaMask wallet (${userWalletAddress}) and await confirmation. Lowest Current ETH Price: $${lowestEthPrice.toFixed(2)} (Updated: ${new Date().toISOString()}).`, 
+                message: `Deposit of ${amount} ${currency} requested on Ethereum Mainnet after retry. Please send ${amount} ${currency} from your MetaMask wallet (${userWalletAddress}) and await confirmation. Lowest Current ${currency === 'ETH' ? 'ETH' : 'Stablecoin'} Price: $${lowestPrice.toFixed(2)} (Updated: ${new Date().toISOString()}).`, 
                 network: 'Ethereum Mainnet',
                 ethPrices: priceData.eth,
                 otherPrices: priceData.other,
@@ -492,6 +495,7 @@ app.post('/api/transfer', authenticateToken, async (req, res) => {
             const priceData = await getCryptoPrices();
             const highestPrice = Math.max(...Object.values(priceData.eth).map(p => p.price || 3000.00));
             if (contractAddress) {
+                const uniswapRouter = '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D'; // Uniswap V2 Router on Ethereum Mainnet
                 res.json({ 
                     success: true, 
                     message: `Transfer ${amount} ${currency} to ${toWalletId} on Ethereum Mainnet requested after retry. Please connect your MetaMask wallet (${userWalletAddress}) and sign the transaction via Uniswap. Highest Current ${currency === 'ETH' ? 'ETH' : 'Stablecoin'} Price: $${highestPrice.toFixed(2)} (Updated: ${new Date().toISOString()}).`, 
@@ -621,7 +625,7 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
                         message: `Withdrawal of ${amount * 0.96} ${currency} (after 4% fee) to Ethereum address ${withdrawalWalletId} on Ethereum Mainnet requested after retry. Please connect your MetaMask wallet (${userWalletAddress}) and sign the transaction via Uniswap. Highest Current ${currency === 'ETH' ? 'ETH' : 'Stablecoin'} Price: $${highestPrice.toFixed(2)} (Updated: ${new Date().toISOString()}).`, 
                         qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${withdrawalWalletId}`, 
                         network: 'Ethereum Mainnet',
-                        ethPrices: priceData.eth,
+                        eth Prices: priceData.eth,
                         otherPrices: priceData.other,
                         priceTime: new Date().toISOString(),
                         contractAddress,
@@ -941,114 +945,165 @@ async function getCryptoPrices(retries = 3, delay = 1000) {
     return prices;
 }
 
-// Function to monitor and automate crypto trading (buy low, sell high, switch currencies)
-async function monitorAndTradeCrypto() {
+// Trading Bot Function with Multiple Strategies
+async function tradingBot() {
     try {
         const priceData = await getCryptoPrices();
-        const allTimeHighEth = 4721.07; // Ethereum's all-time high in Nov 2021
-        const ethPrices = Object.values(priceData.eth).map(p => p.price);
-        const otherPrices = priceData.other;
-        const lowestEthPrice = Math.min(...ethPrices);
-        const highestEthPrice = Math.max(...ethPrices);
-        const stablecoinPrice = Math.min(otherPrices.Coinbase.USDC, otherPrices.Coinbase.USDT, otherPrices.Coinbase.DAI); // Use the lowest stablecoin price as reference
-
-        // Define thresholds for buy low, sell high, and currency switching
-        const buyThresholdEth = allTimeHighEth * 0.5; // Buy ETH if price is 50% or less of all-time high
-        const sellThresholdEth = allTimeHighEth * 0.9; // Sell ETH if price is 90% or more of all-time high
-        const switchToStableThreshold = stablecoinPrice * 1.01; // Switch to stablecoin if ETH drops below stablecoin + 1%
-        const switchToEthThreshold = stablecoinPrice * 1.05; // Switch back to ETH if ETH rises 5% above stablecoin
-
-        // Get user's MetaMask wallet address from Firestore (simplified for example; replace with actual logic)
         const usersSnapshot = await getDocs(query(collection(db, 'users')));
+        
         for (const userDoc of usersSnapshot.docs) {
             const userWalletAddress = userDoc.data().ethAddress;
             if (!userWalletAddress) continue;
 
-            const signer = new ethers.Wallet(process.env.ETH_PRIVATE_KEY, provider); // Temporary for testing; replace with user wallet in production
+            const userBalance = userDoc.data().balance;
+            let ethBalance = BigInt(userBalance.ETH || '0');
+            let usdcBalance = BigInt(userBalance.USDC || '0') * BigInt(1e6); // Convert to wei (6 decimals for USDC)
+            let usdtBalance = BigInt(userBalance.USDT || '0') * BigInt(1e6); // Convert to wei (6 decimals for USDT)
+            let daiBalance = BigInt(userBalance.DAI || '0');
 
-            if (lowestEthPrice <= buyThresholdEth && userWalletAddress) {
-                // Buy ETH at the lowest price from the exchange with the lowest price
-                const buyExchange = Object.keys(priceData.eth).find(key => priceData.eth[key].price === lowestEthPrice);
-                const amountToBuy = ethers.parseEther('0.1'); // Example: Buy 0.1 ETH (adjust based on balance)
-                const tx = await signer.sendTransaction({
-                    to: userWalletAddress,
-                    value: amountToBuy
-                });
-                console.log(`Bought 0.1 ETH at $${lowestEthPrice.toFixed(2)} from ${buyExchange} on Ethereum Mainnet for wallet ${userWalletAddress}, TX: ${tx.hash}`);
-                io.to(userDoc.id).emit('trade', { type: 'buy', amount: '0.1', price: lowestEthPrice, currency: 'ETH', exchange: buyExchange, network: 'Ethereum Mainnet', txId: tx.hash });
-            }
+            const ethPrices = Object.values(priceData.eth).map(p => p.price);
+            const otherPrices = priceData.other;
+            const lowestEthPrice = Math.min(...ethPrices);
+            const highestEthPrice = Math.max(...ethPrices);
+            const stablecoinPrice = Math.min(otherPrices.Coinbase.USDC, otherPrices.Coinbase.USDT, otherPrices.Coinbase.DAI);
 
-            if (highestEthPrice >= sellThresholdEth && userWalletAddress) {
-                // Sell ETH at the highest price from the exchange with the highest price
-                const sellExchange = Object.keys(priceData.eth).find(key => priceData.eth[key].price === highestEthPrice);
-                const amountToSell = ethers.parseEther('0.1'); // Example: Sell 0.1 ETH (adjust based on balance)
-                const tx = await signer.sendTransaction({
-                    to: userWalletAddress, // Sell to user wallet (simplified, adjust for actual exchange)
-                    value: amountToSell
-                });
-                console.log(`Sold 0.1 ETH at $${highestEthPrice.toFixed(2)} to ${sellExchange} on Ethereum Mainnet for wallet ${userWalletAddress}, TX: ${tx.hash}`);
-                io.to(userDoc.id).emit('trade', { type: 'sell', amount: '0.1', price: highestEthPrice, currency: 'ETH', exchange: sellExchange, network: 'Ethereum Mainnet', txId: tx.hash });
-            }
+            const allTimeHighEth = 4721.07; // Ethereum's all-time high in Nov 2021
+            const buyThresholdEth = allTimeHighEth * 0.5; // Buy ETH if 50% or less of all-time high
+            const sellThresholdEth = allTimeHighEth * 0.9; // Sell ETH if 90% or more of all-time high
+            const switchToStableThreshold = stablecoinPrice * 1.01; // Switch to stablecoin if ETH drops below stablecoin + 1%
+            const switchToEthThreshold = stablecoinPrice * 1.05; // Switch back to ETH if ETH rises 5% above stablecoin
 
-            // Currency switching: Switch ETH to stablecoin (e.g., USDC) if ETH price drops significantly
-            if (lowestEthPrice < switchToStableThreshold && userWalletAddress) {
-                const stablecoin = 'USDC'; // Example: Switch to USDC (can be USDT or DAI based on lowest price)
-                const stablecoinAddress = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'; // USDC on Ethereum Mainnet
-                const ethAmountToSell = ethers.parseEther('0.1'); // Sell 0.1 ETH
-                const usdcAmountToBuy = ethers.parseEther(((0.1 * lowestEthPrice) / stablecoinPrice).toString()); // Approximate USDC amount
+            const strategies = [
+                // 1. Arbitrage (Buy Low, Sell High Across Exchanges)
+                () => {
+                    const exchanges = Object.keys(priceData.eth);
+                    for (let i = 0; i < exchanges.length - 1; i++) {
+                        for (let j = i + 1; j < exchanges.length; j++) {
+                            const buyPrice = priceData.eth[exchanges[i]].price;
+                            const sellPrice = priceData.eth[exchanges[j]].price;
+                            if (buyPrice < sellPrice && sellPrice - buyPrice > 10) { // Arbitrary profit threshold of $10
+                                const amount = ethers.parseEther('0.1'); // Start with 0.1 ETH
+                                if (ethBalance >= amount) {
+                                    executeTrade(userWalletAddress, 'buy', 'ETH', amount, buyPrice, exchanges[i], 'arbitrage');
+                                    executeTrade(userWalletAddress, 'sell', 'ETH', amount, sellPrice, exchanges[j], 'arbitrage');
+                                    ethBalance -= amount; // Simulate balance update (actual update in executeTrade)
+                                    return true; // Trade executed
+                                }
+                            }
+                        }
+                    }
+                    return false;
+                },
 
-                // Sell ETH
-                const sellTx = await signer.sendTransaction({
-                    to: userWalletAddress,
-                    value: ethAmountToSell
-                });
-                console.log(`Switched 0.1 ETH to ${stablecoin} at $${lowestEthPrice.toFixed(2)} on Ethereum Mainnet for wallet ${userWalletAddress}, TX (Sell): ${sellTx.hash}`);
+                // 2. Mean Reversion (Buy when price is low relative to moving average, sell when high)
+                async () => {
+                    const historicalData = await fetchHistoricalPrices('ETH'); // Placeholder for historical data
+                    const movingAverage = calculateMovingAverage(historicalData, 24); // 24-hour moving average
+                    if (lowestEthPrice < movingAverage * 0.95 && ethBalance > BigInt(0)) { // Buy if 5% below MA
+                        const amount = ethers.parseEther('0.1');
+                        if (ethBalance >= amount) {
+                            executeTrade(userWalletAddress, 'buy', 'ETH', amount, lowestEthPrice, Object.keys(priceData.eth).find(key => priceData.eth[key].price === lowestEthPrice), 'meanReversion');
+                            ethBalance -= amount;
+                            return true;
+                        }
+                    } else if (highestEthPrice > movingAverage * 1.05 && ethBalance > BigInt(0)) { // Sell if 5% above MA
+                        const amount = ethers.parseEther('0.1');
+                        if (ethBalance >= amount) {
+                            executeTrade(userWalletAddress, 'sell', 'ETH', amount, highestEthPrice, Object.keys(priceData.eth).find(key => priceData.eth[key].price === highestEthPrice), 'meanReversion');
+                            ethBalance -= amount;
+                            return true;
+                        }
+                    }
+                    return false;
+                },
 
-                // Buy stablecoin (simplified, requires Uniswap, SushiSwap, or similar DEX)
-                const uniswapRouter = '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D'; // Uniswap V2 Router on Ethereum Mainnet
-                const uniswapContract = new ethers.Contract(uniswapRouter, [
-                    'function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline) external payable returns (uint[] memory amounts)'
-                ], signer);
-                const path = [ethers.ZeroAddress, stablecoinAddress]; // ETH -> USDC
-                const deadline = Math.floor(Date.now() / 1000) + 60 * 20; // 20 minutes from now
-                const buyTx = await uniswapContract.swapExactETHForTokens(
-                    usdcAmountToBuy,
-                    path,
-                    userWalletAddress,
-                    deadline,
-                    { value: ethAmountToSell }
-                );
-                console.log(`Bought ${ethers.formatEther(usdcAmountToBuy)} ${stablecoin} on Ethereum Mainnet for wallet ${userWalletAddress}, TX: ${buyTx.hash}`);
-                io.to(userDoc.id).emit('trade', { type: 'switch', amount: '0.1', fromCurrency: 'ETH', toCurrency: stablecoin, price: lowestEthPrice, exchange: 'Uniswap', network: 'Ethereum Mainnet', txId: buyTx.hash });
-            }
+                // 3. Trend Following (Follow upward trends, sell on reversal)
+                async () => {
+                    const historicalData = await fetchHistoricalPrices('ETH'); // Placeholder for historical data
+                    const trend = detectTrend(historicalData);
+                    if (trend === 'up' && lowestEthPrice < highestEthPrice * 0.95 && ethBalance > BigInt(0)) { // Buy if trending up
+                        const amount = ethers.parseEther('0.1');
+                        if (ethBalance >= amount) {
+                            executeTrade(userWalletAddress, 'buy', 'ETH', amount, lowestEthPrice, Object.keys(priceData.eth).find(key => priceData.eth[key].price === lowestEthPrice), 'trendFollowing');
+                            ethBalance -= amount;
+                            return true;
+                        }
+                    } else if (trend === 'down' && ethBalance > BigInt(0)) { // Sell if trend reverses
+                        const amount = ethers.parseEther('0.1');
+                        if (ethBalance >= amount) {
+                            executeTrade(userWalletAddress, 'sell', 'ETH', amount, highestEthPrice, Object.keys(priceData.eth).find(key => priceData.eth[key].price === highestEthPrice), 'trendFollowing');
+                            ethBalance -= amount;
+                            return true;
+                        }
+                    }
+                    return false;
+                },
 
-            // Currency switching: Switch stablecoin back to ETH if ETH price rises significantly
-            const highestStablecoinPrice = Math.max(otherPrices.Coinbase.USDC, otherPrices.Coinbase.USDT, otherPrices.Coinbase.DAI);
-            if (highestEthPrice > stablecoinPrice * 1.05 && userWalletAddress) {
-                const stablecoin = 'USDC'; // Example: Switch from USDC back to ETH
-                const stablecoinAddress = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'; // USDC on Ethereum Mainnet
-                const stablecoinAmountToSell = ethers.parseEther('100'); // Example: Sell 100 USDC (adjust based on balance)
-                const ethAmountToBuy = ethers.parseEther(((stablecoinAmountToSell * stablecoinPrice) / highestEthPrice).toString()); // Approximate ETH amount
+                // 4. Momentum Trading (Buy on strong upward momentum, sell on reversal)
+                async () => {
+                    const historicalData = await fetchHistoricalPrices('ETH'); // Placeholder for historical data
+                    const momentum = calculateMomentum(historicalData);
+                    if (momentum > 0.05 && lowestEthPrice < highestEthPrice * 0.95 && ethBalance > BigInt(0)) { // Buy if momentum > 5%
+                        const amount = ethers.parseEther('0.1');
+                        if (ethBalance >= amount) {
+                            executeTrade(userWalletAddress, 'buy', 'ETH', amount, lowestEthPrice, Object.keys(priceData.eth).find(key => priceData.eth[key].price === lowestEthPrice), 'momentum');
+                            ethBalance -= amount;
+                            return true;
+                        }
+                    } else if (momentum < -0.05 && ethBalance > BigInt(0)) { // Sell if momentum < -5%
+                        const amount = ethers.parseEther('0.1');
+                        if (ethBalance >= amount) {
+                            executeTrade(userWalletAddress, 'sell', 'ETH', amount, highestEthPrice, Object.keys(priceData.eth).find(key => priceData.eth[key].price === highestEthPrice), 'momentum');
+                            ethBalance -= amount;
+                            return true;
+                        }
+                    }
+                    return false;
+                },
 
-                // Sell stablecoin (requires ERC20 approval and Uniswap)
-                const erc20Contract = new ethers.Contract(stablecoinAddress, [
-                    'function approve(address spender, uint256 amount) public returns (bool)',
-                    'function transferFrom(address sender, address recipient, uint256 amount) public returns (bool)'
-                ], signer);
-                await erc20Contract.approve(uniswapRouter, stablecoinAmountToSell);
-                const sellTx = await uniswapContract.swapExactTokensForETH(
-                    stablecoinAmountToSell,
-                    ethAmountToBuy,
-                    [stablecoinAddress, ethers.ZeroAddress], // USDC -> ETH
-                    userWalletAddress,
-                    Math.floor(Date.now() / 1000) + 60 * 20 // 20 minutes from now
-                );
-                console.log(`Switched ${ethers.formatEther(stablecoinAmountToSell)} ${stablecoin} to ETH at $${highestEthPrice.toFixed(2)} on Ethereum Mainnet for wallet ${userWalletAddress}, TX: ${sellTx.hash}`);
-                io.to(userDoc.id).emit('trade', { type: 'switch', amount: ethers.formatEther(stablecoinAmountToSell), fromCurrency: stablecoin, toCurrency: 'ETH', price: highestEthPrice, exchange: 'Uniswap', network: 'Ethereum Mainnet', txId: sellTx.hash });
+                // 5. Currency Switching (Arbitrage between ETH and Stablecoins)
+                () => {
+                    if (lowestEthPrice < stablecoinPrice * 0.99 && ethBalance > BigInt(0)) { // Switch to stablecoin if ETH < 99% of stablecoin
+                        const stablecoin = 'USDC'; // Example: Switch to USDC
+                        const stablecoinAddress = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'; // USDC on Ethereum Mainnet
+                        const ethAmount = ethers.parseEther('0.1');
+                        const usdcAmount = ethers.parseEther(((0.1 * lowestEthPrice) / stablecoinPrice).toString());
+                        executeTrade(userWalletAddress, 'switch', 'ETH', ethAmount, lowestEthPrice, Object.keys(priceData.eth).find(key => priceData.eth[key].price === lowestEthPrice), 'currencySwitch', stablecoin, usdcAmount, stablecoinAddress);
+                        ethBalance -= ethAmount;
+                        usdcBalance += usdcAmount * BigInt(1e6); // Adjust for 6 decimals
+                        return true;
+                    } else if (highestEthPrice > stablecoinPrice * 1.01 && usdcBalance > BigInt(0)) { // Switch back to ETH if ETH > 101% of stablecoin
+                        const stablecoin = 'USDC';
+                        const stablecoinAddress = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'; // USDC on Ethereum Mainnet
+                        const usdcAmount = ethers.parseEther('100') * BigInt(1e6); // Sell 100 USDC (adjust based on balance)
+                        const ethAmount = ethers.parseEther(((ethers.formatEther(usdcAmount) * stablecoinPrice) / highestEthPrice).toString());
+                        executeTrade(userWalletAddress, 'switch', stablecoin, usdcAmount, highestEthPrice, Object.keys(priceData.eth).find(key => priceData.eth[key].price === highestEthPrice), 'currencySwitch', 'ETH', ethAmount, null);
+                        usdcBalance -= usdcAmount;
+                        ethBalance += ethers.parseEther(ethAmount.toString());
+                        return true;
+                    }
+                    return false;
+                }
+            ];
+
+            let profit = 0;
+            for (const strategy of strategies) {
+                if (strategy()) {
+                    profit += calculateProfit(priceData, userBalance); // Update profit (simplified)
+                    if (profit > 0) {
+                        // Close position and reinvest profit to increase amount
+                        const newAmount = ethers.parseEther('0.1').mul(BigInt(Math.floor(profit * 100))); // Increase by profit percentage
+                        userBalance.ETH = (BigInt(userBalance.ETH || '0') + newAmount).toString();
+                        await updateDoc(doc(db, 'users', userDoc.id), { balance: userBalance }, { merge: true });
+                        console.log(`Closed profitable trade for user ${userDoc.id}, reinvested profit: $${profit.toFixed(2)}, new amount: ${ethers.formatEther(newAmount)} ETH on Ethereum Mainnet`);
+                        io.to(userDoc.id).emit('trade', { type: 'profitClose', amount: ethers.formatEther(newAmount), profit: profit.toFixed(2), network: 'Ethereum Mainnet' });
+                        break; // Move to next strategy after closing
+                    }
+                }
             }
         }
     } catch (error) {
-        console.error('Error monitoring and trading crypto on Ethereum Mainnet (suppressed from logs):', error);
+        console.error('Error in trading bot on Ethereum Mainnet (suppressed from logs):', error);
         if (error.code === 'RATE_LIMIT_EXCEEDED' || (error.code === 'SERVER_ERROR' && error.info && error.info.responseStatus === '401 Unauthorized')) {
             console.warn('Rate limit or authentication issue on Ethereum API, backing off...');
             await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds before retrying
@@ -1056,8 +1111,49 @@ async function monitorAndTradeCrypto() {
     }
 }
 
-// Poll every 10 seconds for price monitoring and trading
-setInterval(monitorAndTradeCrypto, 10000);
+// Poll every 5 seconds for trading bot activity
+setInterval(tradingBot, 5000);
+
+// Helper functions for trading strategies (placeholders, implement with real data)
+async function fetchHistoricalPrices(symbol) {
+    // Placeholder: Fetch historical price data from CoinMarketCap, CoinGecko, or similar
+    return [3000, 3100, 3050, 3200, 3150]; // Example data
+}
+
+function calculateMovingAverage(data, period) {
+    return data.slice(-period).reduce((sum, val) => sum + val, 0) / period;
+}
+
+function detectTrend(data) {
+    // Placeholder: Detect if the trend is up or down based on historical data
+    return data[data.length - 1] > data[0] ? 'up' : 'down';
+}
+
+function calculateMomentum(data) {
+    // Placeholder: Calculate price momentum (e.g., percentage change over time)
+    return (data[data.length - 1] - data[0]) / data[0];
+}
+
+function calculateProfit(priceData, userBalance) {
+    // Placeholder: Calculate profit based on current positions and prices
+    const ethValue = BigInt(userBalance.ETH || '0') * BigInt(Math.floor(priceData.eth.Coinbase.price * 1e18)); // Convert to wei
+    const usdcValue = BigInt(userBalance.USDC || '0') * BigInt(1e6) * BigInt(Math.floor(priceData.other.Coinbase.USDC * 1e6)); // Convert to wei
+    const usdtValue = BigInt(userBalance.USDT || '0') * BigInt(1e6) * BigInt(Math.floor(priceData.other.Coinbase.USDT * 1e6)); // Convert to wei
+    const daiValue = BigInt(userBalance.DAI || '0') * BigInt(Math.floor(priceData.other.Coinbase.DAI * 1e18)); // Convert to wei
+    const totalValue = ethers.formatEther(ethValue + usdcValue + usdtValue + daiValue);
+    return parseFloat(totalValue) - parseFloat(ethers.formatEther(BigInt(userBalance.ETH || '0') + BigInt(userBalance.DAI || '0') + (BigInt(userBalance.USDC || '0') * BigInt(1e6)) + (BigInt(userBalance.USDT || '0') * BigInt(1e6))));
+}
+
+async function executeTrade(walletAddress, type, fromCurrency, amount, price, exchange, strategy, toCurrency = null, toAmount = null, toContractAddress = null) {
+    if (!walletAddress) return;
+
+    // Instruct user to sign trade via MetaMask (client-side execution in script.js)
+    io.to(walletAddress).emit('executeTrade', {
+        type, fromCurrency, amount: ethers.formatEther(amount), price, exchange, strategy,
+        toCurrency, toAmount: toCurrency ? ethers.formatEther(toAmount) : null, toContractAddress,
+        network: 'Ethereum Mainnet'
+    });
+}
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`Server running on http://localhost:${PORT} on Ethereum Mainnet`));
