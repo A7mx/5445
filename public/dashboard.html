@@ -57,10 +57,11 @@
       <section id="deposit" class="content-card active">
         <h2>Deposit Funds on Ethereum Mainnet</h2>
         <p>Your Wallet ID: <span id="wallet-id">Loading...</span></p>
+        <button id="connect-metamask" onclick="connectWallet()">Connect MetaMask</button>
         <img id="qr-code" src="https://via.placeholder.com/150" alt="QR Code for Deposit on Ethereum Mainnet">
         <input id="deposit-amount" type="number" placeholder="Amount to Deposit (DIS, min 0.01 DIS)" step="0.0001">
-        <button onclick="depositFunds()">Deposit Now</button>
-        <p id="deposit-tip" class="tip">Send DIS (ETH) to the owner wallet address provided after clicking "Deposit Now" on Ethereum Mainnet. Minimum deposit is 0.01 DIS. Current DIS Price: Loading... (Updated: Loading...)</p>
+        <button onclick="depositFunds()" disabled id="deposit-btn">Deposit Now</button>
+        <p id="deposit-tip" class="tip">Connect your wallet (e.g., MetaMask, Trust Wallet) and send DIS (ETH) to your wallet address. Minimum deposit is 0.01 DIS. Current DIS Price: Loading... (Updated: Loading...)</p>
       </section>
       <section id="exchange" class="content-card">
         <h2>Exchange Funds on Ethereum Mainnet</h2>
@@ -68,19 +69,21 @@
       </section>
       <section id="transfer" class="content-card">
         <h2>Transfer Funds on Ethereum Mainnet</h2>
+        <button id="connect-metamask-transfer" onclick="connectWallet()">Connect MetaMask</button>
         <input id="transfer-to-wallet" placeholder="Recipient Wallet ID">
         <input id="transfer-amount" type="number" placeholder="Amount to Transfer (DIS)" step="0.0001">
-        <button onclick="transferFunds()">Transfer Now</button>
-        <p id="transfer-tip" class="tip">Transfer DIS to another user instantly using their wallet ID on Ethereum Mainnet. Current DIS Price: Loading... (Updated: Loading...)</p>
+        <button onclick="transferFunds()" disabled id="transfer-btn">Transfer Now</button>
+        <p id="transfer-tip" class="tip">Connect your wallet (e.g., MetaMask, Trust Wallet) to transfer DIS to another user instantly using their wallet ID on Ethereum Mainnet. Current DIS Price: Loading... (Updated: Loading...)</p>
       </section>
       <section id="withdraw" class="content-card">
         <h2>Withdraw Funds on Ethereum Mainnet</h2>
+        <button id="connect-metamask-withdraw" onclick="connectWallet()">Connect MetaMask</button>
         <input id="withdraw-amount" type="number" placeholder="Amount to Withdraw (DIS, min 0.01 DIS)" step="0.0001">
         <input id="withdrawal-wallet" placeholder="Ethereum Address or PayPal Email (e.g., 0x... or user@paypal.com)">
         <p>4% Withdrawal Fee Will Apply on Ethereum Mainnet. Withdrawal processed manually—check status in History.</p>
-        <button onclick="withdrawFunds()">Withdraw Now</button>
+        <button onclick="withdrawFunds()" disabled id="withdraw-btn">Withdraw Now</button>
         <img id="withdraw-qr" src="https://via.placeholder.com/150" alt="QR Code for Withdrawal on Ethereum Mainnet">
-        <p id="withdraw-tip" class="tip">Withdraw DIS to your Ethereum wallet or PayPal account on Ethereum Mainnet. Minimum withdrawal is 0.01 DIS. No external login required. Current DIS Price: Loading... (Updated: Loading...)</p>
+        <p id="withdraw-tip" class="tip">Connect your wallet (e.g., MetaMask, Trust Wallet) to withdraw DIS to your Ethereum wallet or PayPal account on Ethereum Mainnet. Minimum withdrawal is 0.01 DIS. No external login required. Current DIS Price: Loading... (Updated: Loading...)</p>
       </section>
       <section id="friends" class="content-card">
         <h2>Friends on Ethereum Mainnet</h2>
@@ -98,7 +101,7 @@
     <aside class="sidebar">
       <div class="sidebar-section tips">
         <h3>Tips on Ethereum Mainnet</h3>
-        <p>Keep your wallet secure by using strong passwords and enabling two-factor authentication on Ethereum Mainnet.</p>
+        <p>Keep your wallet secure by using strong passwords, enabling two-factor authentication, and ensuring your wallet (e.g., MetaMask, Trust Wallet) has sufficient ETH for gas fees on Ethereum Mainnet.</p>
       </div>
       <div class="sidebar-section news">
         <h3>News on Ethereum Mainnet</h3>
