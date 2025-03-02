@@ -10,6 +10,7 @@ if (!token) {
 const socket = io({ auth: { token } });
 
 let userData = {};
+let userWalletAddress = null;
 let currentChatId = null;
 
 async function fetchWithToken(url, options = {}) {
@@ -52,8 +53,13 @@ async function refreshUserData() {
       friends: data.friends || [],
       pendingFriends: data.pendingFriends || [],
       ethPrice: data.ethPrice || 3000.00, // Default to $3000.00 if not available (approximate ETH value)
-      priceTime: data.priceTime || new Date().toISOString()
+      priceTime: data.priceTime || new Date().toISOString(),
+      ethAddress: data.ethAddress || null // User's Ethereum address if connected
     };
+    if (userWalletAddress) {
+      userData.ethAddress = userWalletAddress; // Update with connected wallet
+      await fetchWithToken('/api/connect-wallet', { method: 'POST', body: { userWalletAddress } });
+    }
     updateUI();
     socket.emit('join', userData.userId);
     updateFriendsList();
@@ -85,6 +91,21 @@ function updateUI() {
   document.getElementById('wallet-id').textContent = userData.walletId || 'N/A';
   document.getElementById('dis-balance').textContent = `${userData.balance || 0.000000} DIS on Ethereum Mainnet`;
   document.getElementById('dis-value').textContent = `${(userData.balance || 0) * (userData.ethPrice || 3000.00)} USD on Ethereum Mainnet`;
+  if (userData.ethAddress) {
+    document.getElementById('connect-metamask').textContent = 'Wallet Connected: ' + truncateAddress(userData.ethAddress);
+    document.getElementById('connect-metamask-withdraw').textContent = 'Wallet Connected: ' + truncateAddress(userData.ethAddress);
+    document.getElementById('connect-metamask-transfer').textContent = 'Wallet Connected: ' + truncateAddress(userData.ethAddress);
+    document.getElementById('deposit-btn').disabled = false;
+    document.getElementById('withdraw-btn').disabled = false;
+    document.getElementById('transfer-btn').disabled = false;
+  } else {
+    document.getElementById('connect-metamask').textContent = 'Connect MetaMask';
+    document.getElementById('connect-metamask-withdraw').textContent = 'Connect MetaMask';
+    document.getElementById('connect-metamask-transfer').textContent = 'Connect MetaMask';
+    document.getElementById('deposit-btn').disabled = true;
+    document.getElementById('withdraw-btn').disabled = true;
+    document.getElementById('transfer-btn').disabled = true;
+  }
 }
 
 function updateFriendsList() {
@@ -121,18 +142,18 @@ async function updateDisPrice() {
   try {
     const data = await fetchWithToken('/api/eth-price', { method: 'GET' });
     document.getElementById('dis-price').textContent = `DIS Price: $${data.price} (Updated: ${new Date(data.timestamp).toLocaleString()}) on Ethereum Mainnet`;
-    document.getElementById('deposit-tip').textContent = `Send DIS (ETH) to the owner wallet address provided after clicking "Deposit Now" on Ethereum Mainnet. Minimum deposit is 0.01 DIS. Current DIS Price: $${data.price} (Updated: ${new Date(data.timestamp).toLocaleString()}) on Ethereum Mainnet`;
-    document.getElementById('transfer-tip').textContent = `Transfer DIS to another user instantly using their wallet ID on Ethereum Mainnet. Current DIS Price: $${data.price} (Updated: ${new Date(data.timestamp).toLocaleString()}) on Ethereum Mainnet`;
-    document.getElementById('withdraw-tip').textContent = `Withdraw DIS to your Ethereum wallet or PayPal account on Ethereum Mainnet. Minimum withdrawal is 0.01 DIS. No external login required. Current DIS Price: $${data.price} (Updated: ${new Date(data.timestamp).toLocaleString()}) on Ethereum Mainnet`;
+    document.getElementById('deposit-tip').textContent = `Connect your wallet (e.g., MetaMask, Trust Wallet) and send DIS (ETH) to your wallet address. Minimum deposit is 0.01 DIS. Current DIS Price: $${data.price} (Updated: ${new Date(data.timestamp).toLocaleString()}) on Ethereum Mainnet`;
+    document.getElementById('transfer-tip').textContent = `Connect your wallet (e.g., MetaMask, Trust Wallet) to transfer DIS to another user instantly using their wallet ID on Ethereum Mainnet. Current DIS Price: $${data.price} (Updated: ${new Date(data.timestamp).toLocaleString()}) on Ethereum Mainnet`;
+    document.getElementById('withdraw-tip').textContent = `Connect your wallet (e.g., MetaMask, Trust Wallet) to withdraw DIS to your Ethereum wallet or PayPal account on Ethereum Mainnet. Minimum withdrawal is 0.01 DIS. No external login required. Current DIS Price: $${data.price} (Updated: ${new Date(data.timestamp).toLocaleString()}) on Ethereum Mainnet`;
     userData.ethPrice = data.price;
     userData.priceTime = data.timestamp;
     updateUI();
   } catch (error) {
     console.error('Error updating DIS price on Ethereum Mainnet:', error);
     document.getElementById('dis-price').textContent = `DIS Price: $3000.00 (Updated: ${new Date().toLocaleString()}) on Ethereum Mainnet (Error fetching live price)`;
-    document.getElementById('deposit-tip').textContent = `Send DIS (ETH) to the owner wallet address provided after clicking "Deposit Now" on Ethereum Mainnet. Minimum deposit is 0.01 DIS. Current DIS Price: $3000.00 (Updated: ${new Date().toLocaleString()}) on Ethereum Mainnet (Error fetching live price)`;
-    document.getElementById('transfer-tip').textContent = `Transfer DIS to another user instantly using their wallet ID on Ethereum Mainnet. Current DIS Price: $3000.00 (Updated: ${new Date().toLocaleString()}) on Ethereum Mainnet (Error fetching live price)`;
-    document.getElementById('withdraw-tip').textContent = `Withdraw DIS to your Ethereum wallet or PayPal account on Ethereum Mainnet. Minimum withdrawal is 0.01 DIS. No external login required. Current DIS Price: $3000.00 (Updated: ${new Date().toLocaleString()}) on Ethereum Mainnet (Error fetching live price)`;
+    document.getElementById('deposit-tip').textContent = `Connect your wallet (e.g., MetaMask, Trust Wallet) and send DIS (ETH) to your wallet address. Minimum deposit is 0.01 DIS. Current DIS Price: $3000.00 (Updated: ${new Date().toLocaleString()}) on Ethereum Mainnet (Error fetching live price)`;
+    document.getElementById('transfer-tip').textContent = `Connect your wallet (e.g., MetaMask, Trust Wallet) to transfer DIS to another user instantly using their wallet ID on Ethereum Mainnet. Current DIS Price: $3000.00 (Updated: ${new Date().toLocaleString()}) on Ethereum Mainnet (Error fetching live price)`;
+    document.getElementById('withdraw-tip').textContent = `Connect your wallet (e.g., MetaMask, Trust Wallet) to withdraw DIS to your Ethereum wallet or PayPal account on Ethereum Mainnet. Minimum withdrawal is 0.01 DIS. No external login required. Current DIS Price: $3000.00 (Updated: ${new Date().toLocaleString()}) on Ethereum Mainnet (Error fetching live price)`;
     userData.ethPrice = 3000.00;
     userData.priceTime = new Date().toISOString();
     updateUI();
@@ -155,10 +176,63 @@ function deposit() {
   showSection('deposit');
 }
 
+async function connectWallet() {
+  if (typeof window.ethereum !== 'undefined') {
+    // MetaMask connection (browser)
+    try {
+      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+      userWalletAddress = accounts[0];
+      console.log('Connected MetaMask wallet on Ethereum Mainnet:', userWalletAddress);
+      document.getElementById('connect-metamask').textContent = 'Wallet Connected: ' + truncateAddress(userWalletAddress);
+      document.getElementById('connect-metamask-withdraw').textContent = 'Wallet Connected: ' + truncateAddress(userWalletAddress);
+      document.getElementById('connect-metamask-transfer').textContent = 'Wallet Connected: ' + truncateAddress(userWalletAddress);
+      document.getElementById('deposit-btn').disabled = false;
+      document.getElementById('withdraw-btn').disabled = false;
+      document.getElementById('transfer-btn').disabled = false;
+      await fetchWithToken('/api/connect-wallet', { method: 'POST', body: { userWalletAddress } });
+      refreshUserData(); // Update user data with wallet address
+    } catch (error) {
+      console.error('Failed to connect MetaMask on Ethereum Mainnet:', error);
+      showError('Failed to connect MetaMask on Ethereum Mainnet: Please try again.');
+    }
+  } else {
+    // WalletConnect for mobile wallets (e.g., Trust Wallet)
+    try {
+      const Web3Provider = window.Web3Provider || (await import('@walletconnect/web3-provider')).default;
+      const provider = new Web3Provider({
+        infuraId: '6b844349c9964e1395b79d8a39cc6d44', // Use your Infura project ID
+      });
+      await provider.enable();
+      const accounts = await provider.listAccounts();
+      userWalletAddress = accounts[0];
+      console.log('Connected WalletConnect wallet on Ethereum Mainnet:', userWalletAddress);
+      document.getElementById('connect-metamask').textContent = 'Wallet Connected: ' + truncateAddress(userWalletAddress);
+      document.getElementById('connect-metamask-withdraw').textContent = 'Wallet Connected: ' + truncateAddress(userWalletAddress);
+      document.getElementById('connect-metamask-transfer').textContent = 'Wallet Connected: ' + truncateAddress(userWalletAddress);
+      document.getElementById('deposit-btn').disabled = false;
+      document.getElementById('withdraw-btn').disabled = false;
+      document.getElementById('transfer-btn').disabled = false;
+      await fetchWithToken('/api/connect-wallet', { method: 'POST', body: { userWalletAddress } });
+      refreshUserData(); // Update user data with wallet address
+    } catch (error) {
+      console.error('Failed to connect WalletConnect on Ethereum Mainnet:', error);
+      showError('Failed to connect WalletConnect on Ethereum Mainnet: Please install Trust Wallet or try again.');
+    }
+  }
+}
+
+function truncateAddress(address) {
+  return address.slice(0, 6) + '...' + address.slice(-4);
+}
+
 async function depositFunds() {
   const amount = parseFloat(document.getElementById('deposit-amount').value);
   if (isNaN(amount) || amount <= 0 || amount < 0.01) {
     showError('Please enter a valid deposit amount of at least 0.01 DIS on Ethereum Mainnet.');
+    return;
+  }
+  if (!userWalletAddress) {
+    showError('Please connect your wallet (e.g., MetaMask, Trust Wallet) before depositing on Ethereum Mainnet.');
     return;
   }
   try {
@@ -167,14 +241,9 @@ async function depositFunds() {
       showError('Verification required on Ethereum Mainnet.');
       return;
     }
-    const ownerWallet = await fetchWithToken('/api/owner-wallet', { method: 'GET' });
-    await fetchWithToken('/api/deposit', { body: { amount, walletId: userData.walletId, verificationCode } });
-    await fetchWithToken('/api/pending-deposit', {
-      method: 'POST',
-      body: { userId: userData.userId, amount, timestamp: new Date().toISOString(), status: 'pending' }
-    });
+    await fetchWithToken('/api/deposit', { body: { amount, userWalletAddress, verificationCode } });
     const ethPrice = await fetchWithToken('/api/eth-price', { method: 'GET' });
-    showSuccess(`Deposit of ${amount} DIS requested on Ethereum Mainnet. Send ${amount} DIS (ETH) to: ${ownerWallet.wallet} and await confirmation on Ethereum Mainnet. Current DIS Price: $${ethPrice.price} at ${new Date(ethPrice.timestamp).toLocaleString()}.`);
+    showSuccess(`Deposit of ${amount} DIS requested on Ethereum Mainnet. Send ${amount} DIS (ETH) to your wallet address (${userWalletAddress}) and await confirmation. Current DIS Price: $${ethPrice.price} at ${new Date(ethPrice.timestamp).toLocaleString()}.`);
     document.getElementById('deposit-amount').value = '';
   } catch (error) {
     showError('Deposit failed on Ethereum Mainnet: ' + error.message);
@@ -199,13 +268,40 @@ async function transferFunds() {
     showError('Please enter a recipient wallet ID on Ethereum Mainnet.');
     return;
   }
+  if (!userWalletAddress) {
+    showError('Please connect your wallet (e.g., MetaMask, Trust Wallet) before transferring on Ethereum Mainnet.');
+    return;
+  }
   if (toWalletId === userData.walletId) {
     showError('You cannot transfer money to your own wallet on Ethereum Mainnet!');
     return;
   }
   try {
-    const data = await fetchWithToken('/api/transfer', { body: { toWalletId, amount } });
-    showSuccess(data.message);
+    const receiverEthAddress = await fetchWithToken('/api/user', { method: 'GET' }).then(data => {
+      const friend = data.friends.find(f => f.walletId === toWalletId) || data.pendingFriends.find(f => f.walletId === toWalletId);
+      return friend ? friend.ethAddress : null;
+    });
+    if (!receiverEthAddress) {
+      throw new Error('Recipient must connect their Ethereum wallet for peer-to-peer transfers on Ethereum Mainnet.');
+    }
+
+    const amountInWei = ethers.parseEther(amount.toString());
+    await window.ethereum.request({
+      method: 'eth_sendTransaction',
+      params: [{
+        from: userWalletAddress,
+        to: receiverEthAddress,
+        value: ethers.toQuantity(amountInWei),
+        gasLimit: '21000', // Adjust gas limit as needed
+        gasPrice: await provider.getGasPrice() // Use current gas price
+      }]
+    }).then(async (txHash) => {
+      const ethPrice = await fetchWithToken('/api/eth-price', { method: 'GET' });
+      await fetchWithToken('/api/transfer', { body: { toWalletId, amount, txId: txHash } });
+      showSuccess(`Transferred ${amount} DIS to ${toWalletId} on Ethereum Mainnet. Transaction ID: ${txHash}, DIS Price: $${ethPrice.price} at ${new Date(ethPrice.timestamp).toLocaleString()}.`);
+    }).catch(error => {
+      throw new Error('Failed to sign transfer transaction: ' + error.message);
+    });
     refreshUserData();
     document.getElementById('transfer-to-wallet').value = '';
     document.getElementById('transfer-amount').value = '';
@@ -225,11 +321,41 @@ async function withdrawFunds() {
     showError('Please enter a withdrawal wallet address or PayPal email on Ethereum Mainnet.');
     return;
   }
+  if (!userWalletAddress) {
+    showError('Please connect your wallet (e.g., MetaMask, Trust Wallet) before withdrawing on Ethereum Mainnet.');
+    return;
+  }
   try {
-    const data = await fetchWithToken('/api/withdraw', { body: { amount, withdrawalWalletId: withdrawalWallet } });
-    showSuccess(data.message);
-    document.getElementById('withdraw-qr').src = data.qrCode || 'https://via.placeholder.com/150';
-    refreshUserData();
+    // Initiate withdrawal via user wallet
+    if (ethers.isAddress(withdrawalWallet)) {
+      // Request user to sign and send transaction via MetaMask
+      const amountInWei = ethers.parseEther(amount.toString());
+      const feeInWei = ethers.parseEther((amount * 0.04).toString());
+      const amountAfterFeeInWei = amountInWei - feeInWei;
+
+      await window.ethereum.request({
+        method: 'eth_sendTransaction',
+        params: [{
+          from: userWalletAddress,
+          to: withdrawalWallet,
+          value: ethers.toQuantity(amountAfterFeeInWei),
+          gasLimit: '21000', // Adjust gas limit as needed
+          gasPrice: await provider.getGasPrice() // Use current gas price
+        }]
+      }).then(async (txHash) => {
+        const ethPrice = await fetchWithToken('/api/eth-price', { method: 'GET' });
+        await fetchWithToken('/api/withdraw', { 
+          body: { amount, withdrawalWalletId: withdrawalWallet, txId: txHash } 
+        });
+        showSuccess(`Withdrawal of ${ethers.formatEther(amountAfterFeeInWei)} DIS (after 4% fee) to Ethereum address ${withdrawalWallet} on Ethereum Mainnet completed. Transaction ID: ${txHash}, DIS Price: $${ethPrice.price} at ${new Date(ethPrice.timestamp).toLocaleString()}.`);
+      }).catch(error => {
+        throw new Error('Failed to sign withdrawal transaction: ' + error.message);
+      });
+    } else if (withdrawalWallet.includes('@') || withdrawalWallet.includes('.com')) {
+      await fetchWithToken('/api/withdraw', { body: { amount, withdrawalWalletId: withdrawalWallet } });
+      const ethPrice = await fetchWithToken('/api/eth-price', { method: 'GET' });
+      showSuccess(`Withdrawal of ${amount * 0.96} DIS (after 4% fee) to PayPal ${withdrawalWallet} on Ethereum Mainnet requested. Please check your PayPal account for confirmation. DIS Price: $${ethPrice.price} at ${new Date(ethPrice.timestamp).toLocaleString()}.`);
+    }
     document.getElementById('withdraw-amount').value = '';
     document.getElementById('withdrawal-wallet').value = '';
   } catch (error) {
