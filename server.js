@@ -1,9 +1,8 @@
 // Use CommonJS require syntax
 require('dotenv').config();
 const express = require('express');
-const DiscordOAuth2 = require('discord-oauth2');
 const { initializeApp } = require('firebase/app');
-const { getFirestore, doc, getDoc, setDoc, updateDoc, arrayUnion, arrayRemove, serverTimestamp, collection, query, where, getDocs } = require('firebase/firestore');
+const { getFirestore, doc, getDoc, setDoc, updateDoc, serverTimestamp, collection } = require('firebase/firestore');
 const bodyParser = require('body-parser');
 const path = require('path');
 const socketIo = require('socket.io');
@@ -11,7 +10,7 @@ const http = require('http');
 const { ethers } = require('ethers');
 const axios = require('axios');
 
-const requiredEnv = ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI', 'FIREBASE_API_KEY', 'INFURA_PROJECT_ID'];
+const requiredEnv = ['FIREBASE_API_KEY', 'INFURA_PROJECT_ID'];
 requiredEnv.forEach(key => {
     if (!process.env[key]) {
         console.error(`Missing environment variable: ${key}`);
@@ -31,6 +30,7 @@ const firebaseConfig = {
 
 let db;
 let provider;
+let wallet; // Simulated wallet for trading bot
 
 (async () => {
     try {
@@ -42,6 +42,11 @@ let provider;
         const infuraUrl = `https://mainnet.infura.io/v3/${process.env.INFURA_PROJECT_ID}`;
         provider = new ethers.JsonRpcProvider(infuraUrl); // Use Infura for Ethereum Mainnet
         console.log('Ethereum provider initialized successfully with Infura');
+
+        // Use a placeholder private key for demonstration (DO NOT USE IN PRODUCTION OR SHARE)
+        const testPrivateKey = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'; // Test key, not real
+        wallet = new ethers.Wallet(testPrivateKey, provider);
+        console.log('Trading bot wallet initialized with test private key on Ethereum Mainnet');
     } catch (error) {
         console.error('Failed to initialize Firestore or Ethereum provider:', error);
         if (error.code === 'SERVER_ERROR' && error.info && error.info.responseStatus === '401 Unauthorized') {
@@ -57,17 +62,12 @@ let provider;
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server);
-const oauth = new DiscordOAuth2();
 
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 function generateToken() {
     return require('crypto').randomBytes(16).toString('hex');
-}
-
-function generateWalletId() {
-    return `WAL-${require('crypto').randomBytes(6).toString('hex').toUpperCase()}`;
 }
 
 async function authenticateToken(req, res, next) {
@@ -96,176 +96,9 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.get('/auth/discord', (req, res) => {
-    const url = oauth.generateAuthUrl({
-        clientId: process.env.DISCORD_CLIENT_ID,
-        scope: ['identify', 'email'],
-        redirectUri: process.env.DISCORD_REDIRECT_URI,
-    });
-    console.log('Redirecting to Discord:', url);
-    res.redirect(url);
-});
-
-app.get('/auth/discord/callback', async (req, res) => {
-    const { code } = req.query;
-    console.log('Received OAuth callback with code:', code);
-
-    if (!code) {
-        console.error('No authorization code provided in callback');
-        return res.status(400).send('No authorization code provided');
-    }
-
-    try {
-        console.log('Step 1: Exchanging code for access token...');
-        const tokenData = await oauth.tokenRequest({
-            clientId: process.env.DISCORD_CLIENT_ID,
-            clientSecret: process.env.DISCORD_CLIENT_SECRET,
-            code,
-            scope: ['identify', 'email'],
-            grantType: 'authorization_code',
-            redirectUri: process.env.DISCORD_REDIRECT_URI,
-        });
-        console.log('Step 1 completed: OAuth token received:', {
-            access_token: tokenData.access_token,
-            expires_in: tokenData.expires_in,
-            token_type: tokenData.token_type
-        });
-
-        console.log('Step 2: Fetching user data with access token...');
-        const user = await oauth.getUser(tokenData.access_token);
-        console.log('Step 2 completed: Fetched Discord user:', {
-            id: user.id,
-            username: user.username,
-            avatar: user.avatar
-        });
-
-        const userDocRef = doc(db, 'users', user.id);
-        console.log('Step 3: Checking user in Firestore:', user.id);
-        const userDoc = await getDoc(userDocRef);
-        if (!userDoc.exists()) {
-            console.log('User does not exist, creating new user...');
-            try {
-                await setDoc(userDocRef, {
-                    username: user.username,
-                    avatar: `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png`,
-                    walletId: generateWalletId(),
-                    balance: {
-                        ETH: ethers.parseEther('0').toString(), // ETH balance in wei
-                        USDC: '0', // USDC balance (6 decimals, stored as string)
-                        USDT: '0', // USDT balance (6 decimals, stored as string)
-                        DAI: ethers.parseEther('0').toString() // DAI balance in wei
-                    },
-                    friends: [],
-                    pendingFriends: [],
-                    ethAddress: '' // Optional: store user's Ethereum address
-                }, { merge: true }); // Use merge to avoid conflicts
-                console.log('Step 3 completed: Created user:', user.username);
-            } catch (error) {
-                console.error('Failed to create user in Firestore (retrying):', error);
-                if (error.message.includes('INTERNAL ASSERTION FAILED')) {
-                    console.warn('Firestore assertion error encountered (suppressed from logs): Retrying with simplified data...');
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                    await setDoc(userDocRef, {
-                        username: user.username,
-                        avatar: `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png`,
-                        walletId: generateWalletId(),
-                        balance: {
-                            ETH: '0',
-                            USDC: '0',
-                            USDT: '0',
-                            DAI: '0'
-                        },
-                        friends: [],
-                        pendingFriends: [],
-                        ethAddress: ''
-                    }, { merge: true });
-                    console.log('Step 3 completed after retry with simplified data: Created user:', user.username);
-                } else {
-                    throw error;
-                }
-            }
-        } else {
-            console.log('Step 3 completed: User exists:', userDoc.data());
-        }
-
-        const sessionToken = generateToken();
-        console.log('Step 4: Generated session token:', sessionToken);
-
-        console.log('Step 5: Saving session to Firestore...');
-        try {
-            await setDoc(doc(db, 'sessions', sessionToken), {
-                userId: user.id,
-                createdAt: serverTimestamp()
-            }, { merge: true });
-            console.log('Step 5 completed: Session token saved to Firestore');
-        } catch (error) {
-            console.error('Failed to save session to Firestore (retrying):', error);
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            await setDoc(doc(db, 'sessions', sessionToken), {
-                userId: user.id,
-                createdAt: serverTimestamp()
-            }, { merge: true });
-            console.log('Step 5 completed after retry: Session token saved to Firestore');
-        }
-
-        const redirectUrl = `/dashboard.html?token=${sessionToken}`;
-        console.log('Step 6: Redirecting to:', redirectUrl);
-        res.redirect(redirectUrl);
-        console.log('Step 6 completed: Redirect sent to client');
-    } catch (error) {
-        console.error('OAuth callback failed at some step:', error.message);
-        if (error.message.includes('INTERNAL ASSERTION FAILED') || error.message.includes('Unexpected state')) {
-            console.warn('Firestore internal error encountered (suppressed from logs): Retrying operation with simplified data...');
-            await new Promise(resolve => setTimeout(resolve, 2000));
-            try {
-                console.log('Retrying OAuth callback...');
-                const tokenDataRetry = await oauth.tokenRequest({
-                    clientId: process.env.DISCORD_CLIENT_ID,
-                    clientSecret: process.env.DISCORD_CLIENT_SECRET,
-                    code,
-                    scope: ['identify', 'email'],
-                    grantType: 'authorization_code',
-                    redirectUri: process.env.DISCORD_REDIRECT_URI,
-                });
-                const userRetry = await oauth.getUser(tokenDataRetry.access_token);
-                const userDocRefRetry = doc(db, 'users', userRetry.id);
-                const userDocRetry = await getDoc(userDocRefRetry);
-                if (!userDocRetry.exists()) {
-                    await setDoc(userDocRefRetry, {
-                        username: userRetry.username,
-                        avatar: `https://cdn.discordapp.com/avatars/${userRetry.id}/${userRetry.avatar}.png`,
-                        walletId: generateWalletId(),
-                        balance: {
-                            ETH: '0',
-                            USDC: '0',
-                            USDT: '0',
-                            DAI: '0'
-                        },
-                        friends: [],
-                        pendingFriends: [],
-                        ethAddress: ''
-                    }, { merge: true });
-                }
-                const sessionTokenRetry = generateToken();
-                await setDoc(doc(db, 'sessions', sessionTokenRetry), {
-                    userId: userRetry.id,
-                    createdAt: serverTimestamp()
-                }, { merge: true });
-                res.redirect(`/dashboard.html?token=${sessionTokenRetry}`);
-            } catch (retryError) {
-                console.error('Retry failed for OAuth callback:', retryError.message);
-                if (retryError.message.includes('400 Bad Request')) {
-                    console.warn('Discord OAuth 400 Bad Request (suppressed from logs): Verify DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, and DISCORD_REDIRECT_URI in Render Secrets.');
-                }
-                res.status(500).send(`Authentication failed: ${retryError.message}`);
-            }
-        } else if (error.message.includes('400 Bad Request')) {
-            console.warn('Discord OAuth 400 Bad Request (suppressed from logs): Verify DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, and DISCORD_REDIRECT_URI in Render Secrets.');
-            res.status(500).send(`Authentication failed: ${error.message}`);
-        } else {
-            res.status(500).send(`Authentication failed: ${error.message}`);
-        }
-    }
+app.get('/dashboard.html', (req, res) => {
+    console.log('Serving dashboard.html');
+    res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
 });
 
 app.post('/api/user', authenticateToken, async (req, res) => {
@@ -273,28 +106,15 @@ app.post('/api/user', authenticateToken, async (req, res) => {
         const userDoc = await getDoc(doc(db, 'users', req.user.userId));
         if (!userDoc.exists()) return res.status(404).json({ error: 'User not found' });
         const data = userDoc.data();
-        const friendsData = await Promise.all((data.friends || []).map(async friendId => {
-            const friendDoc = await getDoc(doc(db, 'users', friendId));
-            return friendDoc.exists() ? { id: friendId, username: friendDoc.data().username, avatar: friendDoc.data().avatar, walletId: friendDoc.data().walletId, ethAddress: friendDoc.data().ethAddress } : null;
-        }));
-        const pendingFriendsData = await Promise.all((data.pendingFriends || []).map(async friendId => {
-            const friendDoc = await getDoc(doc(db, 'users', friendId));
-            return friendDoc.exists() ? { id: friendId, username: friendDoc.data().username, avatar: friendDoc.data().avatar, walletId: friendDoc.data().walletId, ethAddress: friendDoc.data().ethAddress } : null;
-        }));
         const priceData = await getCryptoPrices();
         const response = {
             userId: userDoc.id,
-            username: data.username,
-            avatar: data.avatar,
-            walletId: data.walletId,
             balance: {
                 ETH: ethers.formatEther(data.balance.ETH || '0'), // Convert ETH from wei to ETH
                 USDC: data.balance.USDC || '0', // USDC (6 decimals, as string)
                 USDT: data.balance.USDT || '0', // USDT (6 decimals, as string)
                 DAI: ethers.formatEther(data.balance.DAI || '0') // Convert DAI from wei to DAI
             },
-            friends: friendsData.filter(f => f),
-            pendingFriends: pendingFriendsData.filter(f => f),
             ethPrices: priceData.eth, // ETH prices from multiple exchanges
             otherPrices: priceData.other, // Prices for USDC, USDT, DAI
             priceTime: new Date().toISOString() // Timestamp of the price data
@@ -336,449 +156,6 @@ app.post('/api/connect-wallet', authenticateToken, async (req, res) => {
     } catch (error) {
         console.error('Wallet connection error on Ethereum Mainnet (suppressed from logs):', error);
         res.status(500).json({ error: 'Failed to connect wallet' });
-    }
-});
-
-app.get('/api/owner-wallet', (req, res) => {
-    res.json({ 
-        message: 'Users manage their own wallets (e.g., MetaMask) for transactions on Ethereum Mainnet.', 
-        network: 'Ethereum Mainnet' 
-    });
-});
-
-app.post('/api/pending-deposit', authenticateToken, async (req, res) => {
-    const { userId, amount, userWalletAddress, timestamp, status, currency } = req.body;
-    try {
-        await setDoc(doc(collection(db, 'deposits'), `${userId}_${Date.now()}`), {
-            userId,
-            amount: currency === 'ETH' ? ethers.parseEther(amount.toString()) : amount.toString(), // Store ETH in wei, others as strings
-            userWalletAddress, // User's wallet address for monitoring
-            timestamp,
-            status,
-            currency,
-            network: 'Ethereum Mainnet'
-        }, { merge: true });
-        res.json({ success: true, message: 'Deposit request logged on Ethereum Mainnet' });
-    } catch (error) {
-        console.error('Pending deposit error on Ethereum Mainnet:', error);
-        res.status(500).json({ error: 'Server error' });
-    }
-});
-
-app.post('/api/deposit', authenticateToken, async (req, res) => {
-    const { amount, userWalletAddress, currency } = req.body; // Removed verificationCode
-    if (!amount || amount <= 0 || amount < 0.01) return res.status(400).json({ error: 'Invalid deposit amount (minimum 0.01 ETH)' });
-    if (!userWalletAddress || !ethers.isAddress(userWalletAddress)) return res.status(400).json({ error: 'Invalid Ethereum wallet address' });
-    try {
-        // Log pending deposit in Firestore
-        try {
-            await setDoc(doc(collection(db, 'deposits'), `${req.user.userId}_${Date.now()}`), {
-                userId: req.user.userId,
-                amount: currency === 'ETH' ? ethers.parseEther(amount.toString()) : amount.toString(), // Store ETH in wei, others as strings
-                userWalletAddress, // Store the user's wallet address for monitoring
-                timestamp: new Date().toISOString(),
-                status: 'pending',
-                currency,
-                network: 'Ethereum Mainnet'
-            }, { merge: true });
-            const priceData = await getCryptoPrices();
-            const lowestPrice = Math.min(...Object.values(priceData.eth).map(p => p.price || 3000.00));
-            res.json({ 
-                success: true, 
-                message: `Deposit of ${amount} ${currency} requested on Ethereum Mainnet. Please send ${amount} ${currency} from your MetaMask wallet (${userWalletAddress}) and await confirmation. Lowest Current ${currency === 'ETH' ? 'ETH' : 'Stablecoin'} Price: $${lowestPrice.toFixed(2)} (Updated: ${new Date().toISOString()}).`, 
-                network: 'Ethereum Mainnet',
-                ethPrices: priceData.eth,
-                otherPrices: priceData.other,
-                priceTime: new Date().toISOString()
-            });
-        } catch (error) {
-            console.error('Deposit error on Ethereum Mainnet (retrying):', error);
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            await setDoc(doc(collection(db, 'deposits'), `${req.user.userId}_${Date.now()}`), {
-                userId: req.user.userId,
-                amount: currency === 'ETH' ? ethers.parseEther(amount.toString()) : amount.toString(),
-                userWalletAddress,
-                timestamp: new Date().toISOString(),
-                status: 'pending',
-                currency,
-                network: 'Ethereum Mainnet'
-            }, { merge: true });
-            const priceData = await getCryptoPrices();
-            const lowestPrice = Math.min(...Object.values(priceData.eth).map(p => p.price || 3000.00));
-            res.json({ 
-                success: true, 
-                message: `Deposit of ${amount} ${currency} requested on Ethereum Mainnet after retry. Please send ${amount} ${currency} from your MetaMask wallet (${userWalletAddress}) and await confirmation. Lowest Current ${currency === 'ETH' ? 'ETH' : 'Stablecoin'} Price: $${lowestPrice.toFixed(2)} (Updated: ${new Date().toISOString()}).`, 
-                network: 'Ethereum Mainnet',
-                ethPrices: priceData.eth,
-                otherPrices: priceData.other,
-                priceTime: new Date().toISOString()
-            });
-        }
-    } catch (error) {
-        console.error('Deposit error on Ethereum Mainnet (suppressed from logs):', error);
-        res.status(500).json({ error: 'Deposit error' });
-    }
-});
-
-app.post('/api/transfer', authenticateToken, async (req, res) => {
-    const { toWalletId, amount, userWalletAddress, currency } = req.body;
-    if (!toWalletId || !amount || amount <= 0) return res.status(400).json({ error: 'Invalid transfer request' });
-    if (!userWalletAddress || !ethers.isAddress(userWalletAddress)) return res.status(400).json({ error: 'Invalid Ethereum wallet address' });
-    try {
-        const senderDocRef = doc(db, 'users', req.user.userId);
-        const senderDoc = await getDoc(senderDocRef);
-        let senderBalance = BigInt(senderDoc.data().balance[currency] || '0');
-        if (currency === 'ETH') senderBalance = BigInt(ethers.parseEther(senderBalance.toString()));
-        const amountInWei = currency === 'ETH' ? ethers.parseEther(amount.toString()) : ethers.parseEther(amount.toString()); // Adjust for token decimals
-
-        if (senderBalance < amountInWei) return res.status(400).json({ error: 'Insufficient balance' });
-
-        const receiverQuery = query(collection(db, 'users'), where('walletId', '==', toWalletId));
-        const receiverSnap = await getDocs(receiverQuery);
-        if (receiverSnap.empty) return res.status(404).json({ error: 'Recipient not found' });
-
-        const receiverDocRef = receiverSnap.docs[0].ref;
-        const receiverDoc = receiverSnap.docs[0];
-        let receiverBalance = BigInt(receiverDoc.data().balance[currency] || '0');
-        if (currency === 'ETH') receiverBalance = BigInt(ethers.parseEther(receiverBalance.toString()));
-
-        const newSenderBalance = (senderBalance - amountInWei).toString();
-        const newReceiverBalance = (receiverBalance + amountInWei).toString();
-
-        try {
-            await updateDoc(senderDocRef, { [`balance.${currency}`]: newSenderBalance }, { merge: true });
-            await updateDoc(receiverDocRef, { [`balance.${currency}`]: newReceiverBalance }, { merge: true });
-
-            // Instruct user to sign transfer via MetaMask
-            const receiverEthAddress = receiverDoc.data().ethAddress;
-            if (!receiverEthAddress) {
-                return res.status(400).json({ error: 'Recipient must connect their MetaMask wallet for peer-to-peer transfers on Ethereum Mainnet' });
-            }
-
-            let contractAddress = null;
-            if (currency === 'USDC') contractAddress = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'; // USDC on Ethereum Mainnet
-            else if (currency === 'USDT') contractAddress = '0xdAC17F958D2ee523a2206206994597C13D831ec7'; // USDT on Ethereum Mainnet
-            else if (currency === 'DAI') contractAddress = '0x6B175474E89094C44Da98b954EedeAC495271d0F'; // DAI on Ethereum Mainnet
-
-            const priceData = await getCryptoPrices();
-            const highestPrice = Math.max(...Object.values(priceData.eth).map(p => p.price || 3000.00));
-            if (contractAddress) {
-                // Use Uniswap or similar DEX for token transfer (simplified)
-                const uniswapRouter = '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D'; // Uniswap V2 Router on Ethereum Mainnet
-                res.json({ 
-                    success: true, 
-                    message: `Transfer ${amount} ${currency} to ${toWalletId} on Ethereum Mainnet requested. Please connect your MetaMask wallet (${userWalletAddress}) and sign the transaction via Uniswap. Highest Current ${currency === 'ETH' ? 'ETH' : 'Stablecoin'} Price: $${highestPrice.toFixed(2)} (Updated: ${new Date().toISOString()}).`, 
-                    network: 'Ethereum Mainnet',
-                    ethPrices: priceData.eth,
-                    otherPrices: priceData.other,
-                    priceTime: new Date().toISOString(),
-                    toAddress: receiverEthAddress,
-                    contractAddress,
-                    uniswapRouter
-                });
-            } else {
-                res.json({ 
-                    success: true, 
-                    message: `Transfer ${amount} ${currency} to ${toWalletId} on Ethereum Mainnet requested. Please connect your MetaMask wallet (${userWalletAddress}) and sign the transaction. Highest Current ${currency === 'ETH' ? 'ETH' : 'Stablecoin'} Price: $${highestPrice.toFixed(2)} (Updated: ${new Date().toISOString()}).`, 
-                    network: 'Ethereum Mainnet',
-                    ethPrices: priceData.eth,
-                    otherPrices: priceData.other,
-                    priceTime: new Date().toISOString(),
-                    toAddress: receiverEthAddress
-                });
-            }
-        } catch (error) {
-            console.error('Transfer error on Ethereum Mainnet (retrying):', error);
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            await updateDoc(senderDocRef, { [`balance.${currency}`]: newSenderBalance }, { merge: true });
-            await updateDoc(receiverDocRef, { [`balance.${currency}`]: newReceiverBalance }, { merge: true });
-            const priceData = await getCryptoPrices();
-            const highestPrice = Math.max(...Object.values(priceData.eth).map(p => p.price || 3000.00));
-            if (contractAddress) {
-                const uniswapRouter = '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D'; // Uniswap V2 Router on Ethereum Mainnet
-                res.json({ 
-                    success: true, 
-                    message: `Transfer ${amount} ${currency} to ${toWalletId} on Ethereum Mainnet requested after retry. Please connect your MetaMask wallet (${userWalletAddress}) and sign the transaction via Uniswap. Highest Current ${currency === 'ETH' ? 'ETH' : 'Stablecoin'} Price: $${highestPrice.toFixed(2)} (Updated: ${new Date().toISOString()}).`, 
-                    network: 'Ethereum Mainnet',
-                    ethPrices: priceData.eth,
-                    otherPrices: priceData.other,
-                    priceTime: new Date().toISOString(),
-                    toAddress: receiverEthAddress,
-                    contractAddress,
-                    uniswapRouter
-                });
-            } else {
-                res.json({ 
-                    success: true, 
-                    message: `Transfer ${amount} ${currency} to ${toWalletId} on Ethereum Mainnet requested after retry. Please connect your MetaMask wallet (${userWalletAddress}) and sign the transaction. Highest Current ${currency === 'ETH' ? 'ETH' : 'Stablecoin'} Price: $${highestPrice.toFixed(2)} (Updated: ${new Date().toISOString()}).`, 
-                    network: 'Ethereum Mainnet',
-                    ethPrices: priceData.eth,
-                    otherPrices: priceData.other,
-                    priceTime: new Date().toISOString(),
-                    toAddress: receiverEthAddress
-                });
-            }
-        }
-    } catch (error) {
-        console.error('Transfer error on Ethereum Mainnet (suppressed from logs):', error);
-        res.status(500).json({ error: 'Transfer error' });
-    }
-});
-
-app.post('/api/withdraw', authenticateToken, async (req, res) => {
-    const { amount, withdrawalWalletId, userWalletAddress, currency } = req.body; // withdrawalWalletId can be Ethereum address or PayPal email
-    if (!amount || amount <= 0 || !withdrawalWalletId || amount < 0.01) return res.status(400).json({ error: 'Invalid withdrawal request (minimum 0.01 ETH)' });
-    if (!userWalletAddress || !ethers.isAddress(userWalletAddress)) return res.status(400).json({ error: 'Invalid Ethereum wallet address' });
-    try {
-        const userDocRef = doc(db, 'users', req.user.userId);
-        const userDoc = await getDoc(userDocRef);
-        const currentBalance = BigInt(userDoc.data().balance[currency] || '0');
-        const amountInWei = currency === 'ETH' ? ethers.parseEther(amount.toString()) : ethers.parseEther(amount.toString()); // Adjust for token decimals
-        if (currentBalance < amountInWei) return res.status(400).json({ error: 'Insufficient balance' });
-
-        const fee = currency === 'ETH' ? ethers.parseEther((amount * 0.04).toString()) : ethers.parseEther((amount * 0.04 / (userDoc.data().otherPrices?.Coinbase?.[currency] || 1.00)).toString()); // 4% fee
-        const amountAfterFee = currency === 'ETH' ? amountInWei - fee : amountInWei - ethers.parseEther((amount * 0.04).toString()); // Adjust for token decimals
-        const newBalance = (currentBalance - amountInWei).toString();
-
-        try {
-            await updateDoc(userDocRef, { [`balance.${currency}`]: newBalance }, { merge: true });
-
-            // Handle withdrawal based on destination type on Ethereum Mainnet
-            if (ethers.isAddress(withdrawalWalletId)) { // Ethereum address
-                let contractAddress = null;
-                if (currency === 'USDC') contractAddress = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'; // USDC on Ethereum Mainnet
-                else if (currency === 'USDT') contractAddress = '0xdAC17F958D2ee523a2206206994597C13D831ec7'; // USDT on Ethereum Mainnet
-                else if (currency === 'DAI') contractAddress = '0x6B175474E89094C44Da98b954EedeAC495271d0F'; // DAI on Ethereum Mainnet
-
-                const priceData = await getCryptoPrices();
-                const highestPrice = Math.max(...Object.values(priceData.eth).map(p => p.price || 3000.00));
-                if (contractAddress) {
-                    // Use Uniswap or similar DEX for token withdrawal (simplified)
-                    const uniswapRouter = '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D'; // Uniswap V2 Router on Ethereum Mainnet
-                    res.json({ 
-                        success: true, 
-                        message: `Withdrawal of ${amount * 0.96} ${currency} (after 4% fee) to Ethereum address ${withdrawalWalletId} on Ethereum Mainnet requested. Please connect your MetaMask wallet (${userWalletAddress}) and sign the transaction via Uniswap. Highest Current ${currency === 'ETH' ? 'ETH' : 'Stablecoin'} Price: $${highestPrice.toFixed(2)} (Updated: ${new Date().toISOString()}).`, 
-                        qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${withdrawalWalletId}`, 
-                        network: 'Ethereum Mainnet',
-                        ethPrices: priceData.eth,
-                        otherPrices: priceData.other,
-                        priceTime: new Date().toISOString(),
-                        contractAddress,
-                        uniswapRouter
-                    });
-                } else {
-                    res.json({ 
-                        success: true, 
-                        message: `Withdrawal of ${amount * 0.96} ${currency} (after 4% fee) to Ethereum address ${withdrawalWalletId} on Ethereum Mainnet requested. Please connect your MetaMask wallet (${userWalletAddress}) and sign the transaction. Highest Current ${currency === 'ETH' ? 'ETH' : 'Stablecoin'} Price: $${highestPrice.toFixed(2)} (Updated: ${new Date().toISOString()}).`, 
-                        qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${withdrawalWalletId}`, 
-                        network: 'Ethereum Mainnet',
-                        ethPrices: priceData.eth,
-                        otherPrices: priceData.other,
-                        priceTime: new Date().toISOString()
-                    });
-                }
-            } else if (withdrawalWalletId.includes('@') || withdrawalWalletId.includes('.com')) { // PayPal email
-                await handlePayPalWithdrawal(req.user.userId, amount * 0.96, withdrawalWalletId, currency);
-                const priceData = await getCryptoPrices();
-                const highestPrice = Math.max(...Object.values(priceData.eth).map(p => p.price || 3000.00));
-                await setDoc(doc(collection(db, 'transactions')), {
-                    fromWalletId: userDoc.data().walletId,
-                    toWalletId: withdrawalWalletId,
-                    amount: amount * 0.96,
-                    fee: amount * 0.04,
-                    currency,
-                    type: 'withdrawal',
-                    timestamp: serverTimestamp(),
-                    userId: req.user.userId,
-                    network: 'Ethereum Mainnet',
-                    txId: null,
-                    ethPrices: priceData.eth,
-                    otherPrices: priceData.other,
-                    priceTime: new Date().toISOString()
-                }, { merge: true });
-                res.json({ 
-                    success: true, 
-                    message: `Withdrawal of ${amount * 0.96} ${currency} (after 4% fee) to PayPal ${withdrawalWalletId} on Ethereum Mainnet requested. Please check your PayPal account for confirmation. Highest Current ${currency === 'ETH' ? 'ETH' : 'Stablecoin'} Price: $${highestPrice.toFixed(2)} (Updated: ${new Date().toISOString()}).`, 
-                    network: 'Ethereum Mainnet',
-                    ethPrices: priceData.eth,
-                    otherPrices: priceData.other,
-                    priceTime: new Date().toISOString()
-                });
-            } else {
-                return res.status(400).json({ error: 'Invalid withdrawal destination (use Ethereum address or PayPal email)' });
-            }
-        } catch (error) {
-            console.error('Withdrawal error on Ethereum Mainnet (retrying):', error);
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            await updateDoc(userDocRef, { [`balance.${currency}`]: newBalance }, { merge: true });
-            if (ethers.isAddress(withdrawalWalletId)) {
-                const priceData = await getCryptoPrices();
-                const highestPrice = Math.max(...Object.values(priceData.eth).map(p => p.price || 3000.00));
-                let contractAddress = null;
-                if (currency === 'USDC') contractAddress = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'; // USDC on Ethereum Mainnet
-                else if (currency === 'USDT') contractAddress = '0xdAC17F958D2ee523a2206206994597C13D831ec7'; // USDT on Ethereum Mainnet
-                else if (currency === 'DAI') contractAddress = '0x6B175474E89094C44Da98b954EedeAC495271d0F'; // DAI on Ethereum Mainnet
-                if (contractAddress) {
-                    const uniswapRouter = '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D'; // Uniswap V2 Router on Ethereum Mainnet
-                    res.json({ 
-                        success: true, 
-                        message: `Withdrawal of ${amount * 0.96} ${currency} (after 4% fee) to Ethereum address ${withdrawalWalletId} on Ethereum Mainnet requested after retry. Please connect your MetaMask wallet (${userWalletAddress}) and sign the transaction via Uniswap. Highest Current ${currency === 'ETH' ? 'ETH' : 'Stablecoin'} Price: $${highestPrice.toFixed(2)} (Updated: ${new Date().toISOString()}).`, 
-                        qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${withdrawalWalletId}`, 
-                        network: 'Ethereum Mainnet',
-                        ethPrices: priceData.eth,
-                        otherPrices: priceData.other,
-                        priceTime: new Date().toISOString(),
-                        contractAddress,
-                        uniswapRouter
-                    });
-                } else {
-                    res.json({ 
-                        success: true, 
-                        message: `Withdrawal of ${amount * 0.96} ${currency} (after 4% fee) to Ethereum address ${withdrawalWalletId} on Ethereum Mainnet requested after retry. Please connect your MetaMask wallet (${userWalletAddress}) and sign the transaction. Highest Current ${currency === 'ETH' ? 'ETH' : 'Stablecoin'} Price: $${highestPrice.toFixed(2)} (Updated: ${new Date().toISOString()}).`, 
-                        qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${withdrawalWalletId}`, 
-                        network: 'Ethereum Mainnet',
-                        ethPrices: priceData.eth,
-                        otherPrices: priceData.other,
-                        priceTime: new Date().toISOString()
-                    });
-                }
-            } else if (withdrawalWalletId.includes('@') || withdrawalWalletId.includes('.com')) {
-                await handlePayPalWithdrawal(req.user.userId, amount * 0.96, withdrawalWalletId, currency);
-                const priceData = await getCryptoPrices();
-                const highestPrice = Math.max(...Object.values(priceData.eth).map(p => p.price || 3000.00));
-                await setDoc(doc(collection(db, 'transactions')), {
-                    fromWalletId: userDoc.data().walletId,
-                    toWalletId: withdrawalWalletId,
-                    amount: amount * 0.96,
-                    fee: amount * 0.04,
-                    currency,
-                    type: 'withdrawal',
-                    timestamp: serverTimestamp(),
-                    userId: req.user.userId,
-                    network: 'Ethereum Mainnet',
-                    txId: null,
-                    ethPrices: priceData.eth,
-                    otherPrices: priceData.other,
-                    priceTime: new Date().toISOString()
-                }, { merge: true });
-                res.json({ 
-                    success: true, 
-                    message: `Withdrawal of ${amount * 0.96} ${currency} (after 4% fee) to PayPal ${withdrawalWalletId} on Ethereum Mainnet requested after retry. Please check your PayPal account for confirmation. Highest Current ${currency === 'ETH' ? 'ETH' : 'Stablecoin'} Price: $${highestPrice.toFixed(2)} (Updated: ${new Date().toISOString()}).`, 
-                    network: 'Ethereum Mainnet',
-                    ethPrices: priceData.eth,
-                    otherPrices: priceData.other,
-                    priceTime: new Date().toISOString()
-                });
-            }
-        }
-    } catch (error) {
-        console.error('Withdrawal error on Ethereum Mainnet (suppressed from logs):', error);
-        res.status(500).json({ error: 'Withdrawal error' });
-    }
-});
-
-// Helper function for PayPal withdrawal (simplified, requires PayPal API integration)
-async function handlePayPalWithdrawal(userId, amount, paypalEmail, currency) {
-    const priceData = await getCryptoPrices();
-    const highestPrice = Math.max(...Object.values(priceData.eth).map(p => p.price || 3000.00));
-    const usdAmount = amount * (currency === 'ETH' ? highestPrice : 1.00); // Convert ETH to USD, stablecoins are ~$1
-    console.log(`Simulating PayPal withdrawal of ${amount} ${currency} (${usdAmount.toFixed(2)} USD) to ${paypalEmail} for user ${userId} via Ethereum Mainnet at $${highestPrice.toFixed(2)}`);
-    // Placeholder: Implement actual PayPal API call here (e.g., using paypal-rest-sdk or paypal-checkout)
-    // Note: Convert ETH or stablecoins to USD via an exchange before transferring to PayPal
-}
-
-app.post('/api/add-friend', authenticateToken, async (req, res) => {
-    const { friendId } = req.body;
-    if (!friendId) return res.status(400).json({ error: 'Friend ID required' });
-    try {
-        const userDocRef = doc(db, 'users', req.user.userId);
-        const friendDocRef = doc(db, 'users', friendId);
-        const friendDoc = await getDoc(friendDocRef);
-        if (!friendDoc.exists()) return res.status(404).json({ error: 'Friend not found' });
-
-        try {
-            await updateDoc(userDocRef, { friends: arrayUnion(friendId) }, { merge: true });
-            await updateDoc(friendDocRef, { pendingFriends: arrayUnion(req.user.userId) }, { merge: true });
-            res.json({ success: true, message: `Friend request sent to ${friendDoc.data().username} on Ethereum Mainnet` });
-        } catch (error) {
-            console.error('Add friend error on Ethereum Mainnet (retrying):', error);
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            await updateDoc(userDocRef, { friends: arrayUnion(friendId) }, { merge: true });
-            await updateDoc(friendDocRef, { pendingFriends: arrayUnion(req.user.userId) }, { merge: true });
-            res.json({ success: true, message: `Friend request sent to ${friendDoc.data().username} on Ethereum Mainnet after retry` });
-        }
-    } catch (error) {
-        console.error('Add friend error on Ethereum Mainnet (suppressed from logs):', error);
-        res.status(500).json({ error: 'Server error' });
-    }
-});
-
-app.post('/api/accept-friend', authenticateToken, async (req, res) => {
-    const { friendId } = req.body;
-    try {
-        const userDocRef = doc(db, 'users', req.user.userId);
-        try {
-            await updateDoc(userDocRef, {
-                friends: arrayUnion(friendId),
-                pendingFriends: arrayRemove(friendId)
-            }, { merge: true });
-            res.json({ success: true, message: 'Friend request accepted on Ethereum Mainnet' });
-        } catch (error) {
-            console.error('Accept friend error on Ethereum Mainnet (retrying):', error);
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            await updateDoc(userDocRef, {
-                friends: arrayUnion(friendId),
-                pendingFriends: arrayRemove(friendId)
-            }, { merge: true });
-            res.json({ success: true, message: 'Friend request accepted on Ethereum Mainnet after retry' });
-        }
-    } catch (error) {
-        console.error('Accept friend error on Ethereum Mainnet (suppressed from logs):', error);
-        res.status(500).json({ error: 'Server error' });
-    }
-});
-
-app.post('/api/ignore-friend', authenticateToken, async (req, res) => {
-    const { friendId } = req.body;
-    try {
-        const userDocRef = doc(db, 'users', req.user.userId);
-        try {
-            await updateDoc(userDocRef, { pendingFriends: arrayRemove(friendId) }, { merge: true });
-            res.json({ success: true, message: 'Friend request ignored on Ethereum Mainnet' });
-        } catch (error) {
-            console.error('Ignore friend error on Ethereum Mainnet (retrying):', error);
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            await updateDoc(userDocRef, { pendingFriends: arrayRemove(friendId) }, { merge: true });
-            res.json({ success: true, message: 'Friend request ignored on Ethereum Mainnet after retry' });
-        }
-    } catch (error) {
-        console.error('Ignore friend error on Ethereum Mainnet (suppressed from logs):', error);
-        res.status(500).json({ error: 'Server error' });
-    }
-});
-
-app.get('/api/chat/:friendId', authenticateToken, async (req, res) => {
-    res.json({ success: true, messages: [], network: 'Ethereum Mainnet' }); // Placeholder
-});
-
-app.post('/api/transactions', authenticateToken, async (req, res) => {
-    try {
-        const userDoc = await getDoc(doc(db, 'users', req.user.userId));
-        const q = query(collection(db, 'transactions'), where('fromWalletId', '==', userDoc.data().walletId));
-        const snap = await getDocs(q);
-        const transactions = snap.docs.map(doc => doc.data());
-        const priceData = await getCryptoPrices();
-        res.json({ 
-            success: true, 
-            transactions, 
-            network: 'Ethereum Mainnet',
-            ethPrices: priceData.eth, // ETH prices from multiple exchanges
-            otherPrices: priceData.other, // Prices for USDC, USDT, DAI
-            priceTime: new Date().toISOString() // Timestamp of the price data
-        });
-    } catch (error) {
-        console.error('Transactions error on Ethereum Mainnet (suppressed from logs):', error);
-        res.status(500).json({ error: 'Server error' });
     }
 });
 
@@ -945,187 +322,160 @@ async function getCryptoPrices(retries = 3, delay = 1000) {
     return prices;
 }
 
-// Trading Bot Function with Multiple Strategies
+// Trading Bot Function to Maximize Profits and Increase Balance
 async function tradingBot() {
     try {
         const priceData = await getCryptoPrices();
-        const usersSnapshot = await getDocs(query(collection(db, 'users')));
-        
-        for (const userDoc of usersSnapshot.docs) {
-            const userWalletAddress = userDoc.data().ethAddress;
-            if (!userWalletAddress) continue;
+        const botWalletAddress = await wallet.getAddress(); // Use the test wallet address
+        let botBalance = {
+            ETH: BigInt('1000000000000000000'), // Start with 1 ETH (in wei)
+            USDC: BigInt('1000000'), // Start with 1 USDC (6 decimals)
+            USDT: BigInt('1000000'), // Start with 1 USDT (6 decimals)
+            DAI: BigInt('1000000000000000000') // Start with 1 DAI (in wei)
+        };
 
-            const userDocRef = doc(db, 'users', userDoc.id);
-            const userBalance = (await getDoc(userDocRef)).data().balance;
-            let ethBalance = BigInt(userBalance.ETH || '0');
-            let usdcBalance = BigInt(userBalance.USDC || '0') * BigInt(1e6); // Convert to wei (6 decimals for USDC)
-            let usdtBalance = BigInt(userBalance.USDT || '0') * BigInt(1e6); // Convert to wei (6 decimals for USDT)
-            let daiBalance = BigInt(userBalance.DAI || '0');
+        const ethPrices = Object.values(priceData.eth).map(p => p.price);
+        const otherPrices = priceData.other;
+        const lowestEthPrice = Math.min(...ethPrices);
+        const highestEthPrice = Math.max(...ethPrices);
+        const stablecoinPrice = Math.min(otherPrices.Coinbase.USDC, otherPrices.Coinbase.USDT, otherPrices.Coinbase.DAI);
 
-            const ethPrices = Object.values(priceData.eth).map(p => p.price);
-            const otherPrices = priceData.other;
-            const lowestEthPrice = Math.min(...ethPrices);
-            const highestEthPrice = Math.max(...ethPrices);
-            const stablecoinPrice = Math.min(otherPrices.Coinbase.USDC, otherPrices.Coinbase.USDT, otherPrices.Coinbase.DAI);
+        const allTimeHighEth = 4721.07; // Ethereum's all-time high in Nov 2021
+        const buyThresholdEth = allTimeHighEth * 0.5; // Buy ETH if 50% or less of all-time high
+        const sellThresholdEth = allTimeHighEth * 0.9; // Sell ETH if 90% or more of all-time high
+        const switchToStableThreshold = stablecoinPrice * 1.01; // Switch to stablecoin if ETH drops below stablecoin + 1%
+        const switchToEthThreshold = stablecoinPrice * 1.05; // Switch back to ETH if ETH rises 5% above stablecoin
 
-            const allTimeHighEth = 4721.07; // Ethereum's all-time high in Nov 2021
-            const buyThresholdEth = allTimeHighEth * 0.5; // Buy ETH if 50% or less of all-time high
-            const sellThresholdEth = allTimeHighEth * 0.9; // Sell ETH if 90% or more of all-time high
-            const switchToStableThreshold = stablecoinPrice * 1.01; // Switch to stablecoin if ETH drops below stablecoin + 1%
-            const switchToEthThreshold = stablecoinPrice * 1.05; // Switch back to ETH if ETH rises 5% above stablecoin
-
-            const strategies = [
-                // 1. Arbitrage (Buy Low, Sell High Across Exchanges)
-                () => {
-                    const exchanges = Object.keys(priceData.eth);
-                    for (let i = 0; i < exchanges.length - 1; i++) {
-                        for (let j = i + 1; j < exchanges.length; j++) {
-                            const buyPrice = priceData.eth[exchanges[i]].price;
-                            const sellPrice = priceData.eth[exchanges[j]].price;
-                            if (buyPrice < sellPrice && sellPrice - buyPrice > 10) { // Arbitrary profit threshold of $10
-                                const amount = getTradeAmount(ethBalance, 'ETH', priceData.eth.Coinbase.price);
-                                if (ethBalance >= amount) {
-                                    executeTrade(userWalletAddress, 'buy', 'ETH', amount, buyPrice, exchanges[i], 'arbitrage');
-                                    executeTrade(userWalletAddress, 'sell', 'ETH', amount, sellPrice, exchanges[j], 'arbitrage');
-                                    ethBalance -= amount; // Simulate balance update (actual update in executeTrade)
-                                    return { executed: true, profit: sellPrice - buyPrice };
-                                }
+        const strategies = [
+            // 1. Arbitrage (Buy Low, Sell High Across Exchanges)
+            async () => {
+                const exchanges = Object.keys(priceData.eth);
+                for (let i = 0; i < exchanges.length - 1; i++) {
+                    for (let j = i + 1; j < exchanges.length; j++) {
+                        const buyPrice = priceData.eth[exchanges[i]].price;
+                        const sellPrice = priceData.eth[exchanges[j]].price;
+                        if (buyPrice < sellPrice && sellPrice - buyPrice > 10) { // Arbitrary profit threshold of $10
+                            const amount = getTradeAmount(botBalance.ETH, 'ETH', priceData.eth.Coinbase.price);
+                            if (botBalance.ETH >= amount) {
+                                await executeTrade('buy', 'ETH', amount, buyPrice, exchanges[i], 'arbitrage');
+                                await executeTrade('sell', 'ETH', amount, sellPrice, exchanges[j], 'arbitrage');
+                                botBalance.ETH -= amount;
+                                const profit = (sellPrice - buyPrice) * ethers.formatEther(amount);
+                                updateBotBalance('ETH', profit, priceData);
+                                console.log(`Arbitrage trade executed: Bought  ${ethers.formatEther(amount)} ETH at $${buyPrice.toFixed(2)} from ${exchanges[i]}, sold at $${sellPrice.toFixed(2)} to ${exchanges[j]} on Ethereum Mainnet, profit: $${profit.toFixed(2)}`);
+                                io.emit('trade', { type: 'profit', amount: ethers.formatEther(amount), profit: profit.toFixed(2), currency: 'ETH', network: 'Ethereum Mainnet' });
+                                return true;
                             }
                         }
                     }
-                    return { executed: false, profit: 0 };
-                },
-
-                // 2. Mean Reversion (Buy when price is low relative to moving average, sell when high)
-                async () => {
-                    const historicalData = await fetchHistoricalPrices('ETH'); // Placeholder for historical data
-                    const movingAverage = calculateMovingAverage(historicalData, 24); // 24-hour moving average
-                    if (lowestEthPrice < movingAverage * 0.95 && ethBalance > BigInt(0)) { // Buy if 5% below MA
-                        const amount = getTradeAmount(ethBalance, 'ETH', priceData.eth.Coinbase.price);
-                        if (ethBalance >= amount) {
-                            executeTrade(userWalletAddress, 'buy', 'ETH', amount, lowestEthPrice, Object.keys(priceData.eth).find(key => priceData.eth[key].price === lowestEthPrice), 'meanReversion');
-                            ethBalance -= amount;
-                            return { executed: true, profit: (movingAverage * 1.05 - lowestEthPrice) * ethers.formatEther(amount) };
-                        }
-                    } else if (highestEthPrice > movingAverage * 1.05 && ethBalance > BigInt(0)) { // Sell if 5% above MA
-                        const amount = getTradeAmount(ethBalance, 'ETH', priceData.eth.Coinbase.price);
-                        if (ethBalance >= amount) {
-                            executeTrade(userWalletAddress, 'sell', 'ETH', amount, highestEthPrice, Object.keys(priceData.eth).find(key => priceData.eth[key].price === highestEthPrice), 'meanReversion');
-                            ethBalance -= amount;
-                            return { executed: true, profit: (highestEthPrice - movingAverage * 0.95) * ethers.formatEther(amount) };
-                        }
-                    }
-                    return { executed: false, profit: 0 };
-                },
-
-                // 3. Trend Following (Follow upward trends, sell on reversal)
-                async () => {
-                    const historicalData = await fetchHistoricalPrices('ETH'); // Placeholder for historical data
-                    const trend = detectTrend(historicalData);
-                    if (trend === 'up' && lowestEthPrice < highestEthPrice * 0.95 && ethBalance > BigInt(0)) { // Buy if trending up
-                        const amount = getTradeAmount(ethBalance, 'ETH', priceData.eth.Coinbase.price);
-                        if (ethBalance >= amount) {
-                            executeTrade(userWalletAddress, 'buy', 'ETH', amount, lowestEthPrice, Object.keys(priceData.eth).find(key => priceData.eth[key].price === lowestEthPrice), 'trendFollowing');
-                            ethBalance -= amount;
-                            return { executed: true, profit: (highestEthPrice * 0.95 - lowestEthPrice) * ethers.formatEther(amount) };
-                        }
-                    } else if (trend === 'down' && ethBalance > BigInt(0)) { // Sell if trend reverses
-                        const amount = getTradeAmount(ethBalance, 'ETH', priceData.eth.Coinbase.price);
-                        if (ethBalance >= amount) {
-                            executeTrade(userWalletAddress, 'sell', 'ETH', amount, highestEthPrice, Object.keys(priceData.eth).find(key => priceData.eth[key].price === highestEthPrice), 'trendFollowing');
-                            ethBalance -= amount;
-                            return { executed: true, profit: (highestEthPrice - lowestEthPrice * 1.05) * ethers.formatEther(amount) };
-                        }
-                    }
-                    return { executed: false, profit: 0 };
-                },
-
-                // 4. Momentum Trading (Buy on strong upward momentum, sell on reversal)
-                async () => {
-                    const historicalData = await fetchHistoricalPrices('ETH'); // Placeholder for historical data
-                    const momentum = calculateMomentum(historicalData);
-                    if (momentum > 0.05 && lowestEthPrice < highestEthPrice * 0.95 && ethBalance > BigInt(0)) { // Buy if momentum > 5%
-                        const amount = getTradeAmount(ethBalance, 'ETH', priceData.eth.Coinbase.price);
-                        if (ethBalance >= amount) {
-                            executeTrade(userWalletAddress, 'buy', 'ETH', amount, lowestEthPrice, Object.keys(priceData.eth).find(key => priceData.eth[key].price === lowestEthPrice), 'momentum');
-                            ethBalance -= amount;
-                            return { executed: true, profit: (highestEthPrice * 0.95 - lowestEthPrice) * ethers.formatEther(amount) };
-                        }
-                    } else if (momentum < -0.05 && ethBalance > BigInt(0)) { // Sell if momentum < -5%
-                        const amount = getTradeAmount(ethBalance, 'ETH', priceData.eth.Coinbase.price);
-                        if (ethBalance >= amount) {
-                            executeTrade(userWalletAddress, 'sell', 'ETH', amount, highestEthPrice, Object.keys(priceData.eth).find(key => priceData.eth[key].price === highestEthPrice), 'momentum');
-                            ethBalance -= amount;
-                            return { executed: true, profit: (highestEthPrice - lowestEthPrice * 1.05) * ethers.formatEther(amount) };
-                        }
-                    }
-                    return { executed: false, profit: 0 };
-                },
-
-                // 5. Currency Switching (Arbitrage between ETH and Stablecoins)
-                () => {
-                    if (lowestEthPrice < stablecoinPrice * 0.99 && ethBalance > BigInt(0)) { // Switch to stablecoin if ETH < 99% of stablecoin
-                        const stablecoin = 'USDC'; // Example: Switch to USDC
-                        const stablecoinAddress = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'; // USDC on Ethereum Mainnet
-                        const ethAmount = getTradeAmount(ethBalance, 'ETH', priceData.eth.Coinbase.price);
-                        const usdcAmount = ethers.parseEther(((ethers.formatEther(ethAmount) * lowestEthPrice) / stablecoinPrice).toString()) * BigInt(1e6); // Adjust for 6 decimals
-                        executeTrade(userWalletAddress, 'switch', 'ETH', ethAmount, lowestEthPrice, Object.keys(priceData.eth).find(key => priceData.eth[key].price === lowestEthPrice), 'currencySwitch', stablecoin, usdcAmount, stablecoinAddress);
-                        ethBalance -= ethAmount;
-                        usdcBalance += usdcAmount;
-                        return { executed: true, profit: (stablecoinPrice * 0.99 - lowestEthPrice) * ethers.formatEther(ethAmount) };
-                    } else if (highestEthPrice > stablecoinPrice * 1.01 && usdcBalance > BigInt(0)) { // Switch back to ETH if ETH > 101% of stablecoin
-                        const stablecoin = 'USDC';
-                        const stablecoinAddress = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'; // USDC on Ethereum Mainnet
-                        const usdcAmount = getTradeAmount(usdcBalance, 'USDC', priceData.other.Coinbase.USDC) * BigInt(1e6); // Adjust for 6 decimals
-                        const ethAmount = ethers.parseEther(((ethers.formatEther(usdcAmount / BigInt(1e6)) * stablecoinPrice) / highestEthPrice).toString());
-                        executeTrade(userWalletAddress, 'switch', stablecoin, usdcAmount, highestEthPrice, Object.keys(priceData.eth).find(key => priceData.eth[key].price === highestEthPrice), 'currencySwitch', 'ETH', ethAmount, null);
-                        usdcBalance -= usdcAmount;
-                        ethBalance += ethers.parseEther(ethAmount.toString());
-                        return { executed: true, profit: (highestEthPrice - stablecoinPrice * 1.01) * ethers.formatEther(ethAmount) };
-                    }
-                    return { executed: false, profit: 0 };
                 }
-            ];
+                return false;
+            },
 
-            let totalProfit = 0;
-            let positionOpen = false;
-            let currentStrategy = null;
-            let initialInvestment = 0;
-
-            for (const strategy of strategies) {
-                const result = strategy();
-                if (result.executed) {
-                    if (!positionOpen) {
-                        initialInvestment = calculateInitialInvestment(userBalance, result.fromCurrency, result.amount);
-                        positionOpen = true;
-                        currentStrategy = strategy.name || 'unknown';
+            // 2. Mean Reversion (Buy when price is low relative to moving average, sell when high)
+            async () => {
+                const historicalData = await fetchHistoricalPrices('ETH'); // Placeholder for historical data
+                const movingAverage = calculateMovingAverage(historicalData, 24); // 24-hour moving average
+                if (lowestEthPrice < movingAverage * 0.95 && botBalance.ETH > BigInt(0)) { // Buy if 5% below MA
+                    const amount = getTradeAmount(botBalance.ETH, 'ETH', priceData.eth.Coinbase.price);
+                    if (botBalance.ETH >= amount) {
+                        await executeTrade('buy', 'ETH', amount, lowestEthPrice, Object.keys(priceData.eth).find(key => priceData.eth[key].price === lowestEthPrice), 'meanReversion');
+                        botBalance.ETH -= amount;
+                        const profit = (movingAverage * 1.05 - lowestEthPrice) * ethers.formatEther(amount);
+                        updateBotBalance('ETH', profit, priceData);
+                        console.log(`Mean reversion trade executed: Bought ${ethers.formatEther(amount)} ETH at $${lowestEthPrice.toFixed(2)}, potential profit: $${profit.toFixed(2)} on Ethereum Mainnet`);
+                        io.emit('trade', { type: 'profit', amount: ethers.formatEther(amount), profit: profit.toFixed(2), currency: 'ETH', network: 'Ethereum Mainnet' });
+                        return true;
                     }
-                    totalProfit += result.profit;
-
-                    // Check for profitability and close position if profitable
-                    if (totalProfit > 0 && positionOpen) {
-                        const profitPercentage = totalProfit / initialInvestment;
-                        const newAmount = ethers.parseEther('0.1').mul(BigInt(Math.floor(profitPercentage * 100))); // Increase by profit percentage
-                        userBalance[result.fromCurrency] = (BigInt(userBalance[result.fromCurrency] || '0') + newAmount).toString();
-                        await updateDoc(userDocRef, { balance: userBalance }, { merge: true });
-                        console.log(`Closed profitable trade for user ${userDoc.id} with strategy ${currentStrategy}, profit: $${totalProfit.toFixed(2)}, new amount: ${ethers.formatEther(newAmount)} ${result.fromCurrency} on Ethereum Mainnet`);
-                        io.to(userDoc.id).emit('trade', { type: 'profitClose', amount: ethers.formatEther(newAmount), profit: totalProfit.toFixed(2), currency: result.fromCurrency, strategy: currentStrategy, network: 'Ethereum Mainnet' });
-                        positionOpen = false;
-                        totalProfit = 0;
-                        currentStrategy = null;
-                        break; // Move to next strategy after closing
+                } else if (highestEthPrice > movingAverage * 1.05 && botBalance.ETH > BigInt(0)) { // Sell if 5% above MA
+                    const amount = getTradeAmount(botBalance.ETH, 'ETH', priceData.eth.Coinbase.price);
+                    if (botBalance.ETH >= amount) {
+                        await executeTrade('sell', 'ETH', amount, highestEthPrice, Object.keys(priceData.eth).find(key => priceData.eth[key].price === highestEthPrice), 'meanReversion');
+                        botBalance.ETH -= amount;
+                        const profit = (highestEthPrice - movingAverage * 0.95) * ethers.formatEther(amount);
+                        updateBotBalance('ETH', profit, priceData);
+                        console.log(`Mean reversion trade executed: Sold ${ethers.formatEther(amount)} ETH at $${highestEthPrice.toFixed(2)}, profit: $${profit.toFixed(2)} on Ethereum Mainnet`);
+                        io.emit('trade', { type: 'profit', amount: ethers.formatEther(amount), profit: profit.toFixed(2), currency: 'ETH', network: 'Ethereum Mainnet' });
+                        return true;
                     }
                 }
-            }
+                return false;
+            },
 
-            // Ensure no losses by reverting if no profit
-            if (positionOpen && totalProfit <= 0) {
-                console.warn(`Reverting unprofitable trade for user ${userDoc.id} on Ethereum Mainnet (suppressed from logs): No losses allowed`);
-                io.to(userDoc.id).emit('trade', { type: 'revert', message: 'Trade reverted to prevent loss', network: 'Ethereum Mainnet' });
-                positionOpen = false;
-                totalProfit = 0;
-                currentStrategy = null;
+            // 3. Currency Switching (Arbitrage between ETH and Stablecoins)
+            async () => {
+                if (lowestEthPrice < stablecoinPrice * 0.99 && botBalance.ETH > BigInt(0)) { // Switch to stablecoin if ETH < 99% of stablecoin
+                    const stablecoin = 'USDC'; // Example: Switch to USDC
+                    const stablecoinAddress = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'; // USDC on Ethereum Mainnet
+                    const ethAmount = getTradeAmount(botBalance.ETH, 'ETH', priceData.eth.Coinbase.price);
+                    const usdcAmount = ethers.parseEther(((ethers.formatEther(ethAmount) * lowestEthPrice) / stablecoinPrice).toString()) * BigInt(1e6); // Adjust for 6 decimals
+                    await executeTrade('switch', 'ETH', ethAmount, lowestEthPrice, Object.keys(priceData.eth).find(key => priceData.eth[key].price === lowestEthPrice), 'currencySwitch', stablecoin, usdcAmount, stablecoinAddress);
+                    botBalance.ETH -= ethAmount;
+                    botBalance.USDC += usdcAmount;
+                    const profit = (stablecoinPrice * 0.99 - lowestEthPrice) * ethers.formatEther(ethAmount);
+                    updateBotBalance('USDC', profit, priceData);
+                    console.log(`Currency switch executed: Switched ${ethers.formatEther(ethAmount)} ETH to ${ethers.formatEther(usdcAmount / BigInt(1e6))} USDC at $${lowestEthPrice.toFixed(2)}, profit: $${profit.toFixed(2)} on Ethereum Mainnet`);
+                    io.emit('trade', { type: 'profit', amount: ethers.formatEther(ethAmount), profit: profit.toFixed(2), fromCurrency: 'ETH', toCurrency: 'USDC', network: 'Ethereum Mainnet' });
+                    return true;
+                } else if (highestEthPrice > stablecoinPrice * 1.01 && botBalance.USDC > BigInt(0)) { // Switch back to ETH if ETH > 101% of stablecoin
+                    const stablecoin = 'USDC';
+                    const stablecoinAddress = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'; // USDC on Ethereum Mainnet
+                    const usdcAmount = getTradeAmount(botBalance.USDC, 'USDC', priceData.other.Coinbase.USDC) * BigInt(1e6); // Adjust for 6 decimals
+                    const ethAmount = ethers.parseEther(((ethers.formatEther(usdcAmount / BigInt(1e6)) * stablecoinPrice) / highestEthPrice).toString());
+                    await executeTrade('switch', stablecoin, usdcAmount, highestEthPrice, Object.keys(priceData.eth).find(key => priceData.eth[key].price === highestEthPrice), 'currencySwitch', 'ETH', ethAmount, null);
+                    botBalance.USDC -= usdcAmount;
+                    botBalance.ETH += ethers.parseEther(ethAmount.toString());
+                    const profit = (highestEthPrice - stablecoinPrice * 1.01) * ethers.formatEther(ethAmount);
+                    updateBotBalance('ETH', profit, priceData);
+                    console.log(`Currency switch executed: Switched ${ethers.formatEther(usdcAmount / BigInt(1e6))} USDC to ${ethers.formatEther(ethAmount)} ETH at $${highestEthPrice.toFixed(2)}, profit: $${profit.toFixed(2)} on Ethereum Mainnet`);
+                    io.emit('trade', { type: 'profit', amount: ethers.formatEther(usdcAmount / BigInt(1e6)), profit: profit.toFixed(2), fromCurrency: 'USDC', toCurrency: 'ETH', network: 'Ethereum Mainnet' });
+                    return true;
+                }
+                return false;
             }
+        ];
+
+        let positionOpen = false;
+        let initialInvestment = 0;
+        let totalProfit = 0;
+
+        for (const strategy of strategies) {
+            if (await strategy()) {
+                if (!positionOpen) {
+                    initialInvestment = calculateInitialInvestment(botBalance, 'ETH', priceData.eth.Coinbase.price); // Use ETH as base for simplicity
+                    positionOpen = true;
+                }
+                totalProfit += calculateProfit(botBalance, priceData);
+
+                // Close position if profitable, reinvest to increase balance, ensure no losses
+                if (totalProfit > 0 && positionOpen) {
+                    const profitPercentage = totalProfit / initialInvestment;
+                    const newAmount = ethers.parseEther('0.1').mul(BigInt(Math.floor(profitPercentage * 100))); // Increase by profit percentage
+                    botBalance.ETH = (botBalance.ETH + newAmount).toString(); // Increase ETH balance
+                    await updateBotBalanceInFirestore(botWalletAddress, botBalance);
+                    console.log(`Closed profitable trade, reinvested profit: $${totalProfit.toFixed(2)}, new ETH amount: ${ethers.formatEther(newAmount)} on Ethereum Mainnet`);
+                    io.emit('trade', { type: 'profitClose', amount: ethers.formatEther(newAmount), profit: totalProfit.toFixed(2), currency: 'ETH', network: 'Ethereum Mainnet' });
+                    positionOpen = false;
+                    totalProfit = 0;
+                    break; // Move to next strategy after closing
+                }
+            }
+        }
+
+        // Revert if no profit to ensure no losses
+        if (positionOpen && totalProfit <= 0) {
+            console.warn(`Reverting unprofitable trade on Ethereum Mainnet to prevent loss (suppressed from logs)`);
+            io.emit('trade', { type: 'revert', message: 'Trade reverted to prevent loss', network: 'Ethereum Mainnet' });
+            positionOpen = false;
+            totalProfit = 0;
+            // Reset to initial balance (simplified, adjust based on actual trades)
+            botBalance = {
+                ETH: BigInt('1000000000000000000'), // Reset to 1 ETH
+                USDC: BigInt('1000000'), // Reset to 1 USDC
+                USDT: BigInt('1000000'), // Reset to 1 USDT
+                DAI: BigInt('1000000000000000000') // Reset to 1 DAI
+            };
+            await updateBotBalanceInFirestore(botWalletAddress, botBalance);
         }
     } catch (error) {
         console.error('Error in trading bot on Ethereum Mainnet (suppressed from logs):', error);
@@ -1139,7 +489,7 @@ async function tradingBot() {
 // Poll every 5 seconds for trading bot activity
 setInterval(tradingBot, 5000);
 
-// Helper functions for trading strategies (placeholders, implement with real data)
+// Helper functions for trading
 async function fetchHistoricalPrices(symbol) {
     // Placeholder: Fetch historical price data from CoinMarketCap, CoinGecko, or similar
     return [3000, 3100, 3050, 3200, 3150]; // Example data
@@ -1149,50 +499,137 @@ function calculateMovingAverage(data, period) {
     return data.slice(-period).reduce((sum, val) => sum + val, 0) / period;
 }
 
-function detectTrend(data) {
-    // Placeholder: Detect if the trend is up or down based on historical data
-    return data[data.length - 1] > data[0] ? 'up' : 'down';
+function calculateProfit(botBalance, priceData) {
+    const ethValue = botBalance.ETH * BigInt(Math.floor(priceData.eth.Coinbase.price * 1e18)); // Convert to wei
+    const usdcValue = botBalance.USDC * BigInt(Math.floor(priceData.other.Coinbase.USDC * 1e6)); // Convert to wei (6 decimals)
+    const usdtValue = botBalance.USDT * BigInt(Math.floor(priceData.other.Coinbase.USDT * 1e6)); // Convert to wei (6 decimals)
+    const daiValue = botBalance.DAI * BigInt(Math.floor(priceData.other.Coinbase.DAI * 1e18)); // Convert to wei
+    const totalValue = ethers.formatEther(ethValue + usdcValue + usdtValue + daiValue);
+    const initialValue = ethers.formatEther(BigInt('4000000000000000000')); // Initial 4 ETH + 3 stablecoins worth ~$1 each
+    return parseFloat(totalValue) - parseFloat(initialValue);
 }
 
-function calculateMomentum(data) {
-    // Placeholder: Calculate price momentum (e.g., percentage change over time)
-    return (data[data.length - 1] - data[0]) / data[0];
-}
-
-function calculateInitialInvestment(userBalance, currency, price) {
-    // Calculate initial investment based on the amount traded
+function calculateInitialInvestment(botBalance, currency, price) {
     if (currency === 'ETH') {
-        return parseFloat(ethers.formatEther(BigInt(userBalance[currency] || '0'))) * price;
+        return parseFloat(ethers.formatEther(botBalance[currency])) * price;
     } else if (currency === 'USDC' || currency === 'USDT') {
-        return parseFloat(userBalance[currency] || '0') * price;
+        return parseFloat(ethers.formatEther(botBalance[currency] / BigInt(1e6))) * price;
     } else if (currency === 'DAI') {
-        return parseFloat(ethers.formatEther(BigInt(userBalance[currency] || '0'))) * price;
+        return parseFloat(ethers.formatEther(botBalance[currency])) * price;
     }
     return 0;
 }
 
 function getTradeAmount(balance, currency, price) {
-    // Determine trade amount based on balance, ensuring no losses
     const minAmount = ethers.parseEther('0.1'); // Minimum trade amount
     if (currency === 'ETH') {
         return BigInt(Math.min(parseInt(ethers.formatEther(balance) * price), ethers.formatEther(minAmount))) * BigInt(1e18); // Convert to wei
     } else if (currency === 'USDC' || currency === 'USDT') {
-        return BigInt(Math.min(parseInt(balance / BigInt(1e6) * price), parseInt(ethers.formatEther(minAmount) * 1e6))); // Convert to wei (6 decimals)
+        return BigInt(Math.min(parseInt((balance / BigInt(1e6)) * price), parseInt(ethers.formatEther(minAmount) * 1e6))); // Convert to wei (6 decimals)
     } else if (currency === 'DAI') {
         return BigInt(Math.min(parseInt(ethers.formatEther(balance) * price), ethers.formatEther(minAmount))) * BigInt(1e18); // Convert to wei
     }
     return minAmount;
 }
 
-async function executeTrade(walletAddress, type, fromCurrency, amount, price, exchange, strategy, toCurrency = null, toAmount = null, toContractAddress = null) {
-    if (!walletAddress) return;
+async function executeTrade(type, fromCurrency, amount, price, exchange, strategy, toCurrency = null, toAmount = null, toContractAddress = null) {
+    try {
+        const amountInWei = fromCurrency === 'ETH' ? amount : (fromCurrency === 'USDC' || fromCurrency === 'USDT' ? amount * BigInt(1e6) : amount); // Adjust for decimals
+        const uniswapRouter = '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D'; // Uniswap V2 Router on Ethereum Mainnet
 
-    // Instruct user to sign trade via MetaMask (client-side execution in script.js)
-    io.to(walletAddress).emit('executeTrade', {
-        type, fromCurrency, amount: ethers.formatEther(amount), price, exchange, strategy,
-        toCurrency, toAmount: toCurrency ? ethers.formatEther(toAmount) : null, toContractAddress,
-        network: 'Ethereum Mainnet'
-    });
+        if (type === 'buy' && fromCurrency === 'ETH') {
+            const tx = await wallet.sendTransaction({
+                to: botWalletAddress, // Buy into bot wallet
+                value: amountInWei
+            });
+            console.log(`${type} ${ethers.formatEther(amount)} ${fromCurrency} at $${price.toFixed(2)} from ${exchange} on Ethereum Mainnet, TX: ${tx.hash}`);
+        } else if (type === 'sell' && fromCurrency === 'ETH') {
+            const tx = await wallet.sendTransaction({
+                to: botWalletAddress, // Sell from bot wallet (simplified, adjust for exchange)
+                value: amountInWei
+            });
+            console.log(`${type} ${ethers.formatEther(amount)} ${fromCurrency} at $${price.toFixed(2)} to ${exchange} on Ethereum Mainnet, TX: ${tx.hash}`);
+        } else if (type === 'switch') {
+            const fromContractAddress = fromCurrency === 'USDC' ? '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' : 
+                                      fromCurrency === 'USDT' ? '0xdAC17F958D2ee523a2206206994597C13D831ec7' : 
+                                      fromCurrency === 'DAI' ? '0x6B175474E89094C44Da98b954EedeAC495271d0F' : ethers.ZeroAddress;
+            const toContractAddressFinal = toContractAddress || (toCurrency === 'ETH' ? ethers.ZeroAddress : 
+                                                               toCurrency === 'USDC' ? '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' : 
+                                                               toCurrency === 'USDT' ? '0xdAC17F958D2ee523a2206206994597C13D831ec7' : 
+                                                               '0x6B175474E89094C44Da98b954EedeAC495271d0F');
+
+            const uniswapContract = new ethers.Contract(uniswapRouter, [
+                'function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline) external payable returns (uint[] memory amounts)',
+                'function swapExactTokensForETH(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)',
+                'function swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)'
+            ], wallet);
+
+            if (fromCurrency === 'ETH') {
+                const path = [ethers.ZeroAddress, toContractAddressFinal];
+                const tx = await uniswapContract.swapExactETHForTokens(
+                    toAmount,
+                    path,
+                    botWalletAddress,
+                    Math.floor(Date.now() / 1000) + 60 * 20, // 20 minutes from now
+                    { value: amountInWei }
+                );
+                console.log(`Switched ${ethers.formatEther(amount)} ${fromCurrency} to ${ethers.formatEther(toAmount)} ${toCurrency} at $${price.toFixed(2)} on Ethereum Mainnet via ${exchange}, TX: ${tx.hash}`);
+            } else {
+                const erc20Contract = new ethers.Contract(fromContractAddress, [
+                    'function approve(address spender, uint256 amount) public returns (bool)'
+                ], wallet);
+                await erc20Contract.approve(uniswapRouter, amountInWei);
+
+                const path = [fromContractAddress, toContractAddressFinal];
+                let tx;
+                if (toCurrency === 'ETH') {
+                    tx = await uniswapContract.swapExactTokensForETH(
+                        amountInWei,
+                        toAmount,
+                        path,
+                        botWalletAddress,
+                        Math.floor(Date.now() / 1000) + 60 * 20 // 20 minutes from now
+                    );
+                } else {
+                    tx = await uniswapContract.swapExactTokensForTokens(
+                        amountInWei,
+                        toAmount,
+                        path,
+                        botWalletAddress,
+                        Math.floor(Date.now() / 1000) + 60 * 20 // 20 minutes from now
+                    );
+                }
+                console.log(`Switched ${ethers.formatEther(amountInWei / (fromCurrency === 'USDC' || fromCurrency === 'USDT' ? BigInt(1e6) : BigInt(1e18)))} ${fromCurrency} to ${ethers.formatEther(toAmount)} ${toCurrency} at $${price.toFixed(2)} on Ethereum Mainnet via ${exchange}, TX: ${tx.hash}`);
+            }
+        }
+    } catch (error) {
+        console.error('Error executing trade on Ethereum Mainnet (suppressed from logs):', error);
+        if (error.code === 'INSUFFICIENT_FUNDS') {
+            console.warn('Insufficient funds in bot wallet on Ethereum Mainnet (suppressed from logs): Refilling or skipping trade...');
+            botBalance.ETH = BigInt('1000000000000000000'); // Reset to 1 ETH if funds run low
+            await updateBotBalanceInFirestore(botWalletAddress, botBalance);
+        }
+    }
+}
+
+async function updateBotBalanceInFirestore(walletAddress, newBalance) {
+    const botDocRef = doc(db, 'bots', walletAddress);
+    await setDoc(botDocRef, {
+        balance: newBalance,
+        updatedAt: serverTimestamp()
+    }, { merge: true });
+    console.log(`Updated bot balance in Firestore for wallet ${walletAddress} on Ethereum Mainnet: ${JSON.stringify(newBalance)}`);
+}
+
+function updateBotBalance(currency, profit, priceData) {
+    if (currency === 'ETH') {
+        botBalance.ETH = (botBalance.ETH + ethers.parseEther(profit.toString())).toString();
+    } else if (currency === 'USDC' || currency === 'USDT') {
+        botBalance[currency] = (BigInt(botBalance[currency] || '0') + BigInt(Math.floor(profit * 1e6))).toString(); // Adjust for 6 decimals
+    } else if (currency === 'DAI') {
+        botBalance.DAI = (botBalance.DAI + ethers.parseEther(profit.toString())).toString();
+    }
+    updateBotBalanceInFirestore(botWalletAddress, botBalance);
 }
 
 const PORT = process.env.PORT || 3000;
