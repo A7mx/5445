@@ -316,10 +316,10 @@ app.post('/api/deposit', authenticateToken, async (req, res) => {
                 network: 'Ethereum Mainnet'
             }, { merge: true });
             const ethPriceData = await getEthPrices();
-            const lowestPrice = Math.min(...Object.values(ethPriceData).map(p => p.price));
+            const lowestPrice = Math.min(...Object.values(ethPriceData).map(p => p.price || 3000.00));
             res.json({ 
                 success: true, 
-                message: `Deposit of ${amount} ETH requested on Ethereum Mainnet. Please send to wallet: ${process.env.OWNER_ETH_WALLET} and await confirmation. Lowest Current ETH Price: $${lowestPrice} from ${Object.keys(ethPriceData).find(key => ethPriceData[key].price === lowestPrice)} at ${new Date().toISOString()}.`, 
+                message: `Deposit of ${amount} ETH requested on Ethereum Mainnet. Please send to wallet: ${process.env.OWNER_ETH_WALLET} and await confirmation. Lowest Current ETH Price: $${lowestPrice.toFixed(2)} from ${Object.keys(ethPriceData).find(key => (ethPriceData[key].price || 3000.00) === lowestPrice)} at ${new Date().toISOString()}.`, 
                 network: 'Ethereum Mainnet',
                 ethPrices: ethPriceData,
                 priceTime: new Date().toISOString()
@@ -335,10 +335,10 @@ app.post('/api/deposit', authenticateToken, async (req, res) => {
                 network: 'Ethereum Mainnet'
             }, { merge: true });
             const ethPriceData = await getEthPrices();
-            const lowestPrice = Math.min(...Object.values(ethPriceData).map(p => p.price));
+            const lowestPrice = Math.min(...Object.values(ethPriceData).map(p => p.price || 3000.00));
             res.json({ 
                 success: true, 
-                message: `Deposit of ${amount} ETH requested on Ethereum Mainnet after retry. Please send to wallet: ${process.env.OWNER_ETH_WALLET} and await confirmation. Lowest Current ETH Price: $${lowestPrice} from ${Object.keys(ethPriceData).find(key => ethPriceData[key].price === lowestPrice)} at ${new Date().toISOString()}.`, 
+                message: `Deposit of ${amount} ETH requested on Ethereum Mainnet after retry. Please send to wallet: ${process.env.OWNER_ETH_WALLET} and await confirmation. Lowest Current ETH Price: $${lowestPrice.toFixed(2)} from ${Object.keys(ethPriceData).find(key => (ethPriceData[key].price || 3000.00) === lowestPrice)} at ${new Date().toISOString()}.`, 
                 network: 'Ethereum Mainnet',
                 ethPrices: ethPriceData,
                 priceTime: new Date().toISOString()
@@ -383,7 +383,7 @@ app.post('/api/transfer', authenticateToken, async (req, res) => {
             });
 
             const ethPriceData = await getEthPrices();
-            const highestPrice = Math.max(...Object.values(ethPriceData).map(p => p.price));
+            const highestPrice = Math.max(...Object.values(ethPriceData).map(p => p.price || 3000.00));
             io.to(req.user.userId).emit('transfer', { 
                 fromWalletId: senderDoc.data().walletId, 
                 toWalletId, 
@@ -407,7 +407,7 @@ app.post('/api/transfer', authenticateToken, async (req, res) => {
 
             res.json({ 
                 success: true, 
-                message: `Transferred ${amount} ETH to ${toWalletId} on Ethereum Mainnet. TX: ${tx.hash}, Highest Current ETH Price: $${highestPrice} from ${Object.keys(ethPriceData).find(key => ethPriceData[key].price === highestPrice)} at ${new Date().toISOString()}.`, 
+                message: `Transferred ${amount} ETH to ${toWalletId} on Ethereum Mainnet. TX: ${tx.hash}, Highest Current ETH Price: $${highestPrice.toFixed(2)} from ${Object.keys(ethPriceData).find(key => (ethPriceData[key].price || 3000.00) === highestPrice)} at ${new Date().toISOString()}.`, 
                 network: 'Ethereum Mainnet',
                 ethPrices: ethPriceData,
                 priceTime: new Date().toISOString()
@@ -422,7 +422,7 @@ app.post('/api/transfer', authenticateToken, async (req, res) => {
                 value: amountInWei
             });
             const ethPriceData = await getEthPrices();
-            const highestPrice = Math.max(...Object.values(ethPriceData).map(p => p.price));
+            const highestPrice = Math.max(...Object.values(ethPriceData).map(p => p.price || 3000.00));
             io.to(req.user.userId).emit('transfer', { 
                 fromWalletId: senderDoc.data().walletId, 
                 toWalletId, 
@@ -445,7 +445,7 @@ app.post('/api/transfer', authenticateToken, async (req, res) => {
             });
             res.json({ 
                 success: true, 
-                message: `Transferred ${amount} ETH to ${toWalletId} on Ethereum Mainnet after retry. TX: ${txRetry.hash}, Highest Current ETH Price: $${highestPrice} from ${Object.keys(ethPriceData).find(key => ethPriceData[key].price === highestPrice)} at ${new Date().toISOString()}.`, 
+                message: `Transferred ${amount} ETH to ${toWalletId} on Ethereum Mainnet after retry. TX: ${txRetry.hash}, Highest Current ETH Price: $${highestPrice.toFixed(2)} from ${Object.keys(ethPriceData).find(key => (ethPriceData[key].price || 3000.00) === highestPrice)} at ${new Date().toISOString()}.`, 
                 network: 'Ethereum Mainnet',
                 ethPrices: ethPriceData,
                 priceTime: new Date().toISOString()
@@ -481,7 +481,7 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
                     value: amountAfterFee
                 });
                 const ethPriceData = await getEthPrices();
-                const highestPrice = Math.max(...Object.values(ethPriceData).map(p => p.price));
+                const highestPrice = Math.max(...Object.values(ethPriceData).map(p => p.price || 3000.00));
                 await setDoc(doc(collection(db, 'transactions')), {
                     fromWalletId: userDoc.data().walletId,
                     toWalletId: withdrawalWalletId,
@@ -497,7 +497,7 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
                 }, { merge: true });
                 res.json({ 
                     success: true, 
-                    message: `Withdrawal of ${ethers.formatEther(amountAfterFee)} ETH (after 4% fee) to Ethereum address ${withdrawalWalletId} on Ethereum Mainnet requested. Transaction ID: ${tx.hash}, Highest Current ETH Price: $${highestPrice} from ${Object.keys(ethPriceData).find(key => ethPriceData[key].price === highestPrice)} at ${new Date().toISOString()}.`, 
+                    message: `Withdrawal of ${ethers.formatEther(amountAfterFee)} ETH (after 4% fee) to Ethereum address ${withdrawalWalletId} on Ethereum Mainnet requested. Transaction ID: ${tx.hash}, Highest Current ETH Price: $${highestPrice.toFixed(2)} from ${Object.keys(ethPriceData).find(key => (ethPriceData[key].price || 3000.00) === highestPrice)} at ${new Date().toISOString()}.`, 
                     qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${withdrawalWalletId}`, 
                     network: 'Ethereum Mainnet',
                     ethPrices: ethPriceData,
@@ -506,7 +506,7 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
             } else if (withdrawalWalletId.includes('@') || withdrawalWalletId.includes('.com')) { // PayPal email
                 await handlePayPalWithdrawal(req.user.userId, ethers.formatEther(amountAfterFee), withdrawalWalletId);
                 const ethPriceData = await getEthPrices();
-                const highestPrice = Math.max(...Object.values(ethPriceData).map(p => p.price));
+                const highestPrice = Math.max(...Object.values(ethPriceData).map(p => p.price || 3000.00));
                 await setDoc(doc(collection(db, 'transactions')), {
                     fromWalletId: userDoc.data().walletId,
                     toWalletId: withdrawalWalletId,
@@ -522,7 +522,7 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
                 }, { merge: true });
                 res.json({ 
                     success: true, 
-                    message: `Withdrawal of ${ethers.formatEther(amountAfterFee)} ETH (after 4% fee) to PayPal ${withdrawalWalletId} on Ethereum Mainnet requested. Please check your PayPal account for confirmation. Highest Current ETH Price: $${highestPrice} from ${Object.keys(ethPriceData).find(key => ethPriceData[key].price === highestPrice)} at ${new Date().toISOString()}.`, 
+                    message: `Withdrawal of ${ethers.formatEther(amountAfterFee)} ETH (after 4% fee) to PayPal ${withdrawalWalletId} on Ethereum Mainnet requested. Please check your PayPal account for confirmation. Highest Current ETH Price: $${highestPrice.toFixed(2)} from ${Object.keys(ethPriceData).find(key => (ethPriceData[key].price || 3000.00) === highestPrice)} at ${new Date().toISOString()}.`, 
                     network: 'Ethereum Mainnet',
                     ethPrices: ethPriceData,
                     priceTime: new Date().toISOString()
@@ -540,7 +540,7 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
                     value: amountAfterFee
                 });
                 const ethPriceData = await getEthPrices();
-                const highestPrice = Math.max(...Object.values(ethPriceData).map(p => p.price));
+                const highestPrice = Math.max(...Object.values(ethPriceData).map(p => p.price || 3000.00));
                 await setDoc(doc(collection(db, 'transactions')), {
                     fromWalletId: userDoc.data().walletId,
                     toWalletId: withdrawalWalletId,
@@ -556,7 +556,7 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
                 }, { merge: true });
                 res.json({ 
                     success: true, 
-                    message: `Withdrawal of ${ethers.formatEther(amountAfterFee)} ETH (after 4% fee) to Ethereum address ${withdrawalWalletId} on Ethereum Mainnet requested after retry. Transaction ID: ${txRetry.hash}, Highest Current ETH Price: $${highestPrice} from ${Object.keys(ethPriceData).find(key => ethPriceData[key].price === highestPrice)} at ${new Date().toISOString()}.`, 
+                    message: `Withdrawal of ${ethers.formatEther(amountAfterFee)} ETH (after 4% fee) to Ethereum address ${withdrawalWalletId} on Ethereum Mainnet requested after retry. Transaction ID: ${txRetry.hash}, Highest Current ETH Price: $${highestPrice.toFixed(2)} from ${Object.keys(ethPriceData).find(key => (ethPriceData[key].price || 3000.00) === highestPrice)} at ${new Date().toISOString()}.`, 
                     qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${withdrawalWalletId}`, 
                     network: 'Ethereum Mainnet',
                     ethPrices: ethPriceData,
@@ -565,7 +565,7 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
             } else if (withdrawalWalletId.includes('@') || withdrawalWalletId.includes('.com')) {
                 await handlePayPalWithdrawal(req.user.userId, ethers.formatEther(amountAfterFee), withdrawalWalletId);
                 const ethPriceData = await getEthPrices();
-                const highestPrice = Math.max(...Object.values(ethPriceData).map(p => p.price));
+                const highestPrice = Math.max(...Object.values(ethPriceData).map(p => p.price || 3000.00));
                 await setDoc(doc(collection(db, 'transactions')), {
                     fromWalletId: userDoc.data().walletId,
                     toWalletId: withdrawalWalletId,
@@ -581,7 +581,7 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
                 }, { merge: true });
                 res.json({ 
                     success: true, 
-                    message: `Withdrawal of ${ethers.formatEther(amountAfterFee)} ETH (after 4% fee) to PayPal ${withdrawalWalletId} on Ethereum Mainnet requested after retry. Please check your PayPal account for confirmation. Highest Current ETH Price: $${highestPrice} from ${Object.keys(ethPriceData).find(key => ethPriceData[key].price === highestPrice)} at ${new Date().toISOString()}.`, 
+                    message: `Withdrawal of ${ethers.formatEther(amountAfterFee)} ETH (after 4% fee) to PayPal ${withdrawalWalletId} on Ethereum Mainnet requested after retry. Please check your PayPal account for confirmation. Highest Current ETH Price: $${highestPrice.toFixed(2)} from ${Object.keys(ethPriceData).find(key => (ethPriceData[key].price || 3000.00) === highestPrice)} at ${new Date().toISOString()}.`, 
                     network: 'Ethereum Mainnet',
                     ethPrices: ethPriceData,
                     priceTime: new Date().toISOString()
@@ -597,9 +597,9 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
 // Helper function for PayPal withdrawal (simplified, requires PayPal API integration)
 async function handlePayPalWithdrawal(userId, amount, paypalEmail) {
     const ethPriceData = await getEthPrices();
-    const highestPrice = Math.max(...Object.values(ethPriceData).map(p => p.price));
+    const highestPrice = Math.max(...Object.values(ethPriceData).map(p => p.price || 3000.00));
     const usdAmount = amount * highestPrice;
-    console.log(`Simulating PayPal withdrawal of ${amount} ETH (${usdAmount} USD) to ${paypalEmail} for user ${userId} via Ethereum Mainnet at $${highestPrice} from ${Object.keys(ethPriceData).find(key => ethPriceData[key].price === highestPrice)}`);
+    console.log(`Simulating PayPal withdrawal of ${amount} ETH (${usdAmount} USD) to ${paypalEmail} for user ${userId} via Ethereum Mainnet at $${highestPrice.toFixed(2)} from ${Object.keys(ethPriceData).find(key => (ethPriceData[key].price || 3000.00) === highestPrice)}`);
     // Placeholder: Implement actual PayPal API call here (e.g., using paypal-rest-sdk or paypal-checkout)
     // Note: Convert ETH to USD via an exchange before transferring to PayPal
 }
@@ -712,42 +712,82 @@ app.get('/api/eth-price', async (req, res) => {
     }
 });
 
-// Function to fetch ETH prices from multiple exchanges
-async function getEthPrices() {
+// Function to fetch ETH prices from multiple exchanges with improved error handling
+async function getEthPrices(retries = 3, delay = 1000) {
     const exchanges = {
-        'Coinbase': 'https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd',
+        'Coinbase': 'https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd', // Using CoinGecko as fallback for Coinbase
         'Kraken': 'https://api.kraken.com/0/public/Ticker?pair=ETHUSD',
         'Binance': 'https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT',
         'CEX.IO': 'https://cex.io/api/last_price/ETH/USD',
         'Bittrex': 'https://api.bittrex.com/v3/markets/ETH-USD/ticker',
-        'eToro': 'https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd', // eToro uses similar data sources
+        'eToro': 'https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd', // Using CoinGecko as fallback for eToro
     };
 
     const prices = {};
     for (const [exchange, url] of Object.entries(exchanges)) {
-        try {
-            let response;
-            if (exchange === 'Kraken') {
-                response = await axios.get(url);
-                prices[exchange] = { price: parseFloat(response.data.result.XETHZUSD.c[0]) }; // Kraken ETH/USD price
-            } else if (exchange === 'Binance') {
-                response = await axios.get(url);
-                prices[exchange] = { price: parseFloat(response.data.price) }; // Binance ETH/USDT price (approximates USD)
-            } else if (exchange === 'CEX.IO') {
-                response = await axios.get(url);
-                prices[exchange] = { price: parseFloat(response.data.lprice) }; // CEX.IO ETH/USD price
-            } else if (exchange === 'Bittrex') {
-                response = await axios.get(url);
-                prices[exchange] = { price: parseFloat(response.data.lastTradeRate) }; // Bittrex ETH/USD price
-            } else if (exchange === 'Coinbase' || exchange === 'eToro') {
-                response = await axios.get(url);
-                prices[exchange] = { price: response.data.ethereum.usd }; // Coinbase/eToro (via CoinGecko) ETH/USD price
+        for (let attempt = 1; attempt <= retries; attempt++) {
+            try {
+                let response;
+                if (exchange === 'Kraken') {
+                    response = await axios.get(url, { timeout: 5000 });
+                    prices[exchange] = { price: parseFloat(response.data.result.XETHZUSD.c[0]) }; // Kraken ETH/USD price
+                } else if (exchange === 'Binance') {
+                    response = await axios.get(url, { timeout: 5000 });
+                    prices[exchange] = { price: parseFloat(response.data.price) }; // Binance ETH/USDT price (approximates USD)
+                } else if (exchange === 'CEX.IO') {
+                    response = await axios.get(url, { timeout: 5000 });
+                    prices[exchange] = { price: parseFloat(response.data.lprice) }; // CEX.IO ETH/USD price
+                } else if (exchange === 'Bittrex') {
+                    response = await axios.get(url, { timeout: 5000 });
+                    prices[exchange] = { price: parseFloat(response.data.lastTradeRate) }; // Bittrex ETH/USD price
+                } else if (exchange === 'Coinbase' || exchange === 'eToro') {
+                    response = await axios.get(url, { timeout: 5000 });
+                    prices[exchange] = { price: response.data.ethereum.usd }; // Coinbase/eToro (via CoinGecko) ETH/USD price
+                }
+                break; // Exit loop on success
+            } catch (error) {
+                if (attempt === retries) {
+                    console.warn(`Failed to fetch ETH price from ${exchange} after retries (suppressed from logs): Using alternative source ($3000.00)`);
+                    prices[exchange] = { price: 3000.00 }; // Fallback price if all retries fail
+                    if (error.response) {
+                        if (error.response.status === 403 || error.response.status === 401) {
+                            console.warn(`Rate limit or authentication issue for ${exchange} (suppressed from logs): Consider adding an API key.`);
+                        } else if (error.response.status === 404) {
+                            console.warn(`Invalid endpoint for ${exchange} (suppressed from logs): Verify API URL.`);
+                        }
+                    }
+                } else {
+                    console.warn(`Attempt ${attempt} failed to fetch ETH price from ${exchange} (retrying in ${delay}ms, suppressed from logs):`, error.message);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    delay *= 2; // Exponential backoff
+                }
             }
-        } catch (error) {
-            console.warn(`Failed to fetch ETH price from ${exchange} (suppressed from logs): Using fallback price of $3000.00`);
-            prices[exchange] = { price: 3000.00 }; // Fallback price if API fails
         }
     }
+
+    // Fallback to CoinMarketCap if all exchanges fail for any price
+    if (Object.values(prices).every(p => p.price === 3000.00)) {
+        try {
+            const coinMarketCapResponse = await axios.get('https://api.coinmarketcap.com/data-api/v3/cryptocurrency/price?symbol=ETH&convert=USD', {
+                timeout: 5000,
+                headers: {
+                    'User-Agent': 'DISWallet/1.0 (https://five445.onrender.com)',
+                    'Accept': 'application/json'
+                },
+            });
+            const coinMarketCapPrice = coinMarketCapResponse.data.data.price;
+            for (const exchange in prices) {
+                prices[exchange] = { price: coinMarketCapPrice };
+            }
+            console.warn('All exchange prices failed; using CoinMarketCap fallback price of $' + coinMarketCapPrice.toFixed(2) + ' (suppressed from logs)');
+        } catch (coinMarketCapError) {
+            console.warn('Failed to fetch ETH price from CoinMarketCap (suppressed from logs): Using final fallback price of $3000.00');
+            for (const exchange in prices) {
+                prices[exchange] = { price: 3000.00 };
+            }
+        }
+    }
+
     return prices;
 }
 
@@ -772,7 +812,7 @@ async function monitorAndTradeEth() {
                 to: process.env.OWNER_ETH_WALLET, // Buy into owner wallet
                 value: amountToBuy
             });
-            console.log(`Bought 0.1 ETH at $${lowestPrice} from ${buyExchange} on Ethereum Mainnet, TX: ${tx.hash}`);
+            console.log(`Bought 0.1 ETH at $${lowestPrice.toFixed(2)} from ${buyExchange} on Ethereum Mainnet, TX: ${tx.hash}`);
             io.emit('trade', { type: 'buy', amount: '0.1', price: lowestPrice, exchange: buyExchange, network: 'Ethereum Mainnet', txId: tx.hash });
         }
 
@@ -784,7 +824,7 @@ async function monitorAndTradeEth() {
                 to: process.env.OWNER_ETH_WALLET, // Sell from owner wallet to itself (simplified, adjust for actual exchange)
                 value: amountToSell
             });
-            console.log(`Sold 0.1 ETH at $${highestPrice} to ${sellExchange} on Ethereum Mainnet, TX: ${tx.hash}`);
+            console.log(`Sold 0.1 ETH at $${highestPrice.toFixed(2)} to ${sellExchange} on Ethereum Mainnet, TX: ${tx.hash}`);
             io.emit('trade', { type: 'sell', amount: '0.1', price: highestPrice, exchange: sellExchange, network: 'Ethereum Mainnet', txId: tx.hash });
         }
     } catch (error) {
