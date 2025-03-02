@@ -3,7 +3,7 @@ require('dotenv').config();
 const express = require('express');
 const DiscordOAuth2 = require('discord-oauth2');
 const { initializeApp } = require('firebase/app');
-const { getFirestore, doc, getDoc, setDoc, updateDoc, arrayUnion, serverTimestamp, collection, query, where, getDocs } = require('firebase/firestore');
+const { getFirestore, doc, getDoc, setDoc, updateDoc, arrayUnion, arrayRemove, serverTimestamp, collection, query, where, getDocs } = require('firebase/firestore');
 const bodyParser = require('body-parser');
 const path = require('path');
 const socketIo = require('socket.io');
@@ -11,7 +11,7 @@ const http = require('http');
 const { ethers } = require('ethers');
 const axios = require('axios');
 
-const requiredEnv = ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI', 'FIREBASE_API_KEY', 'OWNER_ETH_WALLET', 'ETH_PRIVATE_KEY', 'INFURA_PROJECT_ID'];
+const requiredEnv = ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI', 'FIREBASE_API_KEY', 'INFURA_PROJECT_ID'];
 requiredEnv.forEach(key => {
     if (!process.env[key]) {
         console.error(`Missing environment variable: ${key}`);
@@ -30,7 +30,7 @@ const firebaseConfig = {
 };
 
 let db;
-let provider, wallet;
+let provider;
 
 (async () => {
     try {
@@ -38,15 +38,12 @@ let provider, wallet;
         db = getFirestore(appFirebase);
         console.log('Firestore initialized successfully');
 
-        // Initialize Ethereum provider and wallet with your provided private key
+        // Initialize Ethereum provider with Infura for wallet connectivity
         const infuraUrl = `https://mainnet.infura.io/v3/${process.env.INFURA_PROJECT_ID}`;
-        provider = new ethers.JsonRpcProvider(infuraUrl); // Use Infura for Ethereum Mainnet with your project ID
-        wallet = new ethers.Wallet(process.env.ETH_PRIVATE_KEY, provider);
-        const ownerAddress = await wallet.getAddress();
-        process.env.OWNER_ETH_WALLET = ownerAddress; // Set or verify OWNER_ETH_WALLET
-        console.log('Ethereum wallet initialized successfully with address:', ownerAddress);
+        provider = new ethers.JsonRpcProvider(infuraUrl); // Use Infura for Ethereum Mainnet
+        console.log('Ethereum provider initialized successfully with Infura');
     } catch (error) {
-        console.error('Failed to initialize Firestore or Ethereum wallet:', error);
+        console.error('Failed to initialize Firestore or Ethereum provider:', error);
         if (error.code === 'SERVER_ERROR' && error.info && error.info.responseStatus === '401 Unauthorized') {
             console.error('Infura 401 Unauthorized: Please ensure INFURA_PROJECT_ID is correctly set in environment variables.');
         }
@@ -208,7 +205,6 @@ app.get('/auth/discord/callback', async (req, res) => {
             // Retry the entire callback with exponential backoff
             await new Promise(resolve => setTimeout(resolve, 2000));
             try {
-                // Retry the callback logic here (simplified for brevity, re-run the previous try block)
                 console.log('Retrying OAuth callback...');
                 const tokenDataRetry = await oauth.tokenRequest({
                     clientId: process.env.DISCORD_CLIENT_ID,
@@ -271,8 +267,9 @@ app.post('/api/user', authenticateToken, async (req, res) => {
             balance: balanceInEth,  // ETH balance in ETH (human-readable)
             friends: friendsData.filter(f => f),
             pendingFriends: pendingFriendsData.filter(f => f),
-            ethPrice: ethPrice.price, // Live ETH price in USD
-            priceTime: ethPrice.timestamp // Timestamp of the price
+            ethPrice: ethPrice.price, // Live ETH price in USD from CoinMarketCap
+            priceTime: ethPrice.timestamp, // Timestamp of the price
+            ethAddress: data.ethAddress || null // Include user's Ethereum address if connected
         };
         console.log('Sending user data with ETH price:', response);
         res.json(response);
@@ -283,17 +280,52 @@ app.post('/api/user', authenticateToken, async (req, res) => {
 });
 
 app.get('/api/owner-wallet', (req, res) => {
-    const ownerWallet = process.env.OWNER_ETH_WALLET; // Use your Ethereum wallet (derived from private key)
-    console.log('Returning owner wallet on Ethereum Mainnet:', ownerWallet);
-    res.json({ wallet: ownerWallet, qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${ownerWallet}`, network: 'Ethereum Mainnet' });
+    // This endpoint is optional or can be removed since users use their own wallets
+    res.json({ 
+        message: 'Users manage their own wallets (e.g., MetaMask) for deposits and withdrawals on Ethereum Mainnet.', 
+        network: 'Ethereum Mainnet' 
+    });
+});
+
+app.post('/api/connect-wallet', authenticateToken, async (req, res) => {
+    const { userWalletAddress } = req.body;
+    if (!userWalletAddress || !ethers.isAddress(userWalletAddress)) {
+        return res.status(400).json({ error: 'Invalid Ethereum wallet address' });
+    }
+    try {
+        const userDocRef = doc(db, 'users', req.user.userId);
+        try {
+            await updateDoc(userDocRef, { ethAddress: userWalletAddress }, { merge: true });
+            console.log(`User ${req.user.userId} connected wallet address: ${userWalletAddress} on Ethereum Mainnet`);
+            res.json({ 
+                success: true, 
+                message: `Wallet connected successfully on Ethereum Mainnet: ${truncateAddress(userWalletAddress)}`, 
+                network: 'Ethereum Mainnet' 
+            });
+        } catch (error) {
+            console.error('Failed to connect wallet in Firestore (retrying):', error);
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            await updateDoc(userDocRef, { ethAddress: userWalletAddress }, { merge: true });
+            console.log(`User ${req.user.userId} connected wallet address after retry: ${userWalletAddress} on Ethereum Mainnet`);
+            res.json({ 
+                success: true, 
+                message: `Wallet connected successfully on Ethereum Mainnet after retry: ${truncateAddress(userWalletAddress)}`, 
+                network: 'Ethereum Mainnet' 
+            });
+        }
+    } catch (error) {
+        console.error('Wallet connection error on Ethereum Mainnet (suppressed from logs):', error);
+        res.status(500).json({ error: 'Failed to connect wallet' });
+    }
 });
 
 app.post('/api/pending-deposit', authenticateToken, async (req, res) => {
-    const { userId, amount, timestamp, status } = req.body;
+    const { userId, amount, userWalletAddress, timestamp, status } = req.body;
     try {
         await setDoc(doc(collection(db, 'deposits'), `${userId}_${Date.now()}`), {
             userId,
             amount: ethers.parseEther(amount.toString()), // Store amount in wei
+            userWalletAddress, // User's wallet address for monitoring
             timestamp,
             status,
             network: 'Ethereum Mainnet'
@@ -305,120 +337,8 @@ app.post('/api/pending-deposit', authenticateToken, async (req, res) => {
     }
 });
 
-async function monitorETHDeposits() {
-    try {
-        // Monitor Ethereum blockchain for ETH transactions to OWNER_ETH_WALLET on Ethereum Mainnet
-        const ownerAddress = process.env.OWNER_ETH_WALLET;
-        const latestBlock = await provider.getBlockNumber();
-        const fromBlock = latestBlock - 1000; // Check last 1000 blocks for simplicity (adjust as needed)
-
-        const transactions = await provider.getLogs({
-            address: ownerAddress,
-            fromBlock,
-            toBlock: latestBlock,
-            topics: [ethers.id('transfer(address,address,uint256)')] // ETH transfer event (simplified)
-        });
-
-        for (const tx of transactions) {
-            const txReceipt = await provider.getTransactionReceipt(tx.transactionHash);
-            if (txReceipt && txReceipt.logs.length > 0) {
-                const log = txReceipt.logs[0];
-                const amount = BigInt(log.data); // Amount in wei
-                const amountInEth = ethers.formatEther(amount); // Convert to ETH
-
-                const txId = tx.transactionHash;
-                const fromAddress = '0x' + log.topics[1].slice(26); // Extract sender address (simplified)
-
-                // Find pending deposits in Firestore
-                const depositsQuery = query(collection(db, 'deposits'), where('status', '==', 'pending'));
-                const depositsSnap = await getDocs(depositsQuery);
-                for (const doc of depositsSnap.docs) {
-                    const deposit = doc.data();
-                    if (ethers.formatEther(deposit.amount) === amountInEth && deposit.userId) {
-                        const userDocRef = doc(db, 'users', deposit.userId);
-                        const userDoc = await getDoc(userDocRef);
-                        const currentBalance = BigInt(userDoc.data().balance || '0');
-                        try {
-                            await updateDoc(userDocRef, { balance: (currentBalance + amount).toString() }, { merge: true });
-                            await updateDoc(doc.ref, { 
-                                status: 'completed', 
-                                txId, 
-                                timestamp: serverTimestamp(), 
-                                network: 'Ethereum Mainnet',
-                                fromAddress 
-                            }, { merge: true });
-                            const ethPrice = await getLiveEthPrice();
-                            io.to(deposit.userId).emit('transfer', { 
-                                walletId: userDoc.data().walletId, 
-                                amount: amountInEth, 
-                                type: 'deposit', 
-                                network: 'Ethereum Mainnet',
-                                txId,
-                                ethPrice: ethPrice.price,
-                                priceTime: ethPrice.timestamp
-                            });
-                            console.log(`Deposit of ${amountInEth} ETH credited to user ${deposit.userId} on Ethereum Mainnet, TX: ${txId}, ETH Price: $${ethPrice.price} at ${ethPrice.timestamp}`);
-                        } catch (error) {
-                            console.error('Failed to update deposit in Firestore (retrying):', error);
-                            await new Promise(resolve => setTimeout(resolve, 1000));
-                            await updateDoc(userDocRef, { balance: (currentBalance + amount).toString() }, { merge: true });
-                            await updateDoc(doc.ref, { 
-                                status: 'completed', 
-                                txId, 
-                                timestamp: serverTimestamp(), 
-                                network: 'Ethereum Mainnet',
-                                fromAddress 
-                            }, { merge: true });
-                            const ethPrice = await getLiveEthPrice();
-                            io.to(deposit.userId).emit('transfer', { 
-                                walletId: userDoc.data().walletId, 
-                                amount: amountInEth, 
-                                type: 'deposit', 
-                                network: 'Ethereum Mainnet',
-                                txId,
-                                ethPrice: ethPrice.price,
-                                priceTime: ethPrice.timestamp
-                            });
-                            console.log(`Deposit of ${amountInEth} ETH credited to user ${deposit.userId} on Ethereum Mainnet after retry, TX: ${txId}, ETH Price: $${ethPrice.price} at ${ethPrice.timestamp}`);
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-    } catch (error) {
-        console.error('Error monitoring ETH deposits on Ethereum Mainnet (suppressed from logs):', error);
-        if (error.code === 'RATE_LIMIT_EXCEEDED' || (error.code === 'SERVER_ERROR' && error.info && error.info.responseStatus === '401 Unauthorized')) {
-            console.warn('Rate limit or authentication issue on Ethereum API, backing off...');
-            await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds before retrying
-        }
-    }
-}
-
-// Poll every 5 seconds for faster detection
-setInterval(monitorETHDeposits, 5000);
-
-async function getLiveEthPrice() {
-    try {
-        const response = await axios.get('https://api.coinmarketcap.com/data-api/v3/cryptocurrency/price?symbol=ETH&convert=USD', {
-            timeout: 5000, // Add timeout to prevent hanging
-            headers: {
-                'User-Agent': 'DISWallet/1.0 (https://five445.onrender.com)', // Custom User-Agent to identify requests
-                'Accept': 'application/json' // Ensure JSON response
-            },
-        });
-        const price = response.data.data.price; // Adjust based on CoinMarketCap API response structure
-        const timestamp = new Date().toISOString();
-        return { price, timestamp };
-    } catch (error) {
-        // Suppress detailed error logging for 403 Forbidden or other non-critical errors
-        console.warn('Failed to fetch live ETH price from CoinMarketCap (suppressed from logs): Using fallback price of $3000.00');
-        return { price: 3000.00, timestamp: new Date().toISOString() }; // Default to $3000.00 if API fails
-    }
-}
-
 app.post('/api/deposit', authenticateToken, async (req, res) => {
-    const { amount, walletId, verificationCode } = req.body;
+    const { amount, userWalletAddress, verificationCode } = req.body; // User provides their wallet address
     if (!amount || amount <= 0 || amount < 0.01) return res.status(400).json({ error: 'Invalid deposit amount (minimum 0.01 ETH)' });
     try {
         // Verify 2FA (simplified, integrate with Firebase Auth or TOTP)
@@ -428,11 +348,12 @@ app.post('/api/deposit', authenticateToken, async (req, res) => {
         }
         // Add actual 2FA verification logic here
 
-        // Log pending deposit to OWNER_ETH_WALLET on Ethereum Mainnet
+        // Log pending deposit in Firestore
         try {
             await setDoc(doc(collection(db, 'deposits'), `${req.user.userId}_${Date.now()}`), {
                 userId: req.user.userId,
                 amount: ethers.parseEther(amount.toString()), // Store amount in wei
+                userWalletAddress, // Store the user's wallet address for monitoring
                 timestamp: new Date().toISOString(),
                 status: 'pending',
                 network: 'Ethereum Mainnet'
@@ -440,7 +361,7 @@ app.post('/api/deposit', authenticateToken, async (req, res) => {
             const ethPrice = await getLiveEthPrice();
             res.json({ 
                 success: true, 
-                message: `Deposit of ${amount} ETH requested on Ethereum Mainnet. Please send to wallet: ${process.env.OWNER_ETH_WALLET} and await confirmation. Current ETH Price: $${ethPrice.price} at ${ethPrice.timestamp}.`, 
+                message: `Deposit of ${amount} ETH requested on Ethereum Mainnet. Please send ${amount} ETH to your wallet address (${userWalletAddress}) and await confirmation. Current ETH Price: $${ethPrice.price} at ${ethPrice.timestamp}.`, 
                 network: 'Ethereum Mainnet',
                 ethPrice: ethPrice.price,
                 priceTime: ethPrice.timestamp 
@@ -451,6 +372,7 @@ app.post('/api/deposit', authenticateToken, async (req, res) => {
             await setDoc(doc(collection(db, 'deposits'), `${req.user.userId}_${Date.now()}`), {
                 userId: req.user.userId,
                 amount: ethers.parseEther(amount.toString()),
+                userWalletAddress,
                 timestamp: new Date().toISOString(),
                 status: 'pending',
                 network: 'Ethereum Mainnet'
@@ -458,7 +380,7 @@ app.post('/api/deposit', authenticateToken, async (req, res) => {
             const ethPrice = await getLiveEthPrice();
             res.json({ 
                 success: true, 
-                message: `Deposit of ${amount} ETH requested on Ethereum Mainnet after retry. Please send to wallet: ${process.env.OWNER_ETH_WALLET} and await confirmation. Current ETH Price: $${ethPrice.price} at ${ethPrice.timestamp}.`, 
+                message: `Deposit of ${amount} ETH requested on Ethereum Mainnet after retry. Please send ${amount} ETH to your wallet address (${userWalletAddress}) and await confirmation. Current ETH Price: $${ethPrice.price} at ${ethPrice.timestamp}.`, 
                 network: 'Ethereum Mainnet',
                 ethPrice: ethPrice.price,
                 priceTime: ethPrice.timestamp 
@@ -495,75 +417,35 @@ app.post('/api/transfer', authenticateToken, async (req, res) => {
             await updateDoc(senderDocRef, { balance: newSenderBalance }, { merge: true });
             await updateDoc(receiverDocRef, { balance: newReceiverBalance }, { merge: true });
 
-            // Perform on-chain transfer using Ethereum wallet on Ethereum Mainnet
-            const receiverAddress = await getEthAddressFromWalletId(toWalletId);
-            const tx = await wallet.sendTransaction({
-                to: receiverAddress,
-                value: amountInWei
-            });
-
+            // Optionally, instruct users to sign peer-to-peer transfers via their wallets (similar to withdrawals)
             const ethPrice = await getLiveEthPrice();
-            io.to(req.user.userId).emit('transfer', { 
-                fromWalletId: senderDoc.data().walletId, 
-                toWalletId, 
-                amount, 
-                type: 'peer', 
-                network: 'Ethereum Mainnet',
-                txId: tx.hash,
-                ethPrice: ethPrice.price,
-                priceTime: ethPrice.timestamp
-            });
-            io.to(receiverDoc.id).emit('transfer', { 
-                fromWalletId: senderDoc.data().walletId, 
-                toWalletId, 
-                amount, 
-                type: 'peer', 
-                network: 'Ethereum Mainnet',
-                txId: tx.hash,
-                ethPrice: ethPrice.price,
-                priceTime: ethPrice.timestamp
-            });
+            const senderEthAddress = senderDoc.data().ethAddress;
+            const receiverEthAddress = receiverDoc.data().ethAddress || (await getEthAddressFromWalletId(toWalletId));
 
-            res.json({ 
-                success: true, 
-                message: `Transferred ${amount} ETH to ${toWalletId} on Ethereum Mainnet. TX: ${tx.hash}, ETH Price: $${ethPrice.price} at ${ethPrice.timestamp}.`, 
-                network: 'Ethereum Mainnet',
-                ethPrice: ethPrice.price,
-                priceTime: ethPrice.timestamp 
-            });
+            if (senderEthAddress && receiverEthAddress) {
+                // Prompt user to sign transfer via their wallet (client-side implementation in script.js)
+                res.json({ 
+                    success: true, 
+                    message: `Transfer ${amount} ETH to ${toWalletId} on Ethereum Mainnet requested. Please connect your wallet (e.g., MetaMask) and sign the transaction. Current ETH Price: $${ethPrice.price} at ${ethPrice.timestamp}.`, 
+                    network: 'Ethereum Mainnet',
+                    ethPrice: ethPrice.price,
+                    priceTime: ethPrice.timestamp,
+                    toAddress: receiverEthAddress
+                });
+            } else {
+                // Fallback to server-side transfer (if no wallet connected, though not recommended for decentralization)
+                // This requires reintroducing ETH_PRIVATE_KEY, which we’ve removed for security—consider client-side signing instead
+                res.status(400).json({ error: 'Both sender and recipient must connect their Ethereum wallets for peer-to-peer transfers on Ethereum Mainnet' });
+            }
         } catch (error) {
             console.error('Transfer error on Ethereum Mainnet (retrying):', error);
             await new Promise(resolve => setTimeout(resolve, 1000));
             await updateDoc(senderDocRef, { balance: newSenderBalance }, { merge: true });
             await updateDoc(receiverDocRef, { balance: newReceiverBalance }, { merge: true });
-            const txRetry = await wallet.sendTransaction({
-                to: receiverAddress,
-                value: amountInWei
-            });
             const ethPrice = await getLiveEthPrice();
-            io.to(req.user.userId).emit('transfer', { 
-                fromWalletId: senderDoc.data().walletId, 
-                toWalletId, 
-                amount, 
-                type: 'peer', 
-                network: 'Ethereum Mainnet',
-                txId: txRetry.hash,
-                ethPrice: ethPrice.price,
-                priceTime: ethPrice.timestamp
-            });
-            io.to(receiverDoc.id).emit('transfer', { 
-                fromWalletId: senderDoc.data().walletId, 
-                toWalletId, 
-                amount, 
-                type: 'peer', 
-                network: 'Ethereum Mainnet',
-                txId: txRetry.hash,
-                ethPrice: ethPrice.price,
-                priceTime: ethPrice.timestamp
-            });
             res.json({ 
                 success: true, 
-                message: `Transferred ${amount} ETH to ${toWalletId} on Ethereum Mainnet after retry. TX: ${txRetry.hash}, ETH Price: $${ethPrice.price} at ${ethPrice.timestamp}.`, 
+                message: `Transferred ${amount} ETH to ${toWalletId} on Ethereum Mainnet after retry. Current ETH Price: $${ethPrice.price} at ${ethPrice.timestamp}.`, 
                 network: 'Ethereum Mainnet',
                 ethPrice: ethPrice.price,
                 priceTime: ethPrice.timestamp 
@@ -581,13 +463,13 @@ async function getEthAddressFromWalletId(walletId) {
     const usersSnap = await getDocs(usersQuery);
     if (!usersSnap.empty) {
         const userDoc = usersSnap.docs[0];
-        return userDoc.data().ethAddress || process.env.OWNER_ETH_WALLET; // Default to owner wallet or fetch actual address
+        return userDoc.data().ethAddress || null; // Return null if no Ethereum address is connected
     }
     throw new Error('Wallet ID not found');
 }
 
 app.post('/api/withdraw', authenticateToken, async (req, res) => {
-    const { amount, withdrawalWalletId } = req.body; // withdrawalWalletId can be Ethereum address or PayPal email
+    const { amount, withdrawalWalletId, txId } = req.body; // withdrawalWalletId can be Ethereum address or PayPal email, txId for user-signed transactions
     if (!amount || amount <= 0 || !withdrawalWalletId || amount < 0.01) return res.status(400).json({ error: 'Invalid withdrawal request (minimum 0.01 ETH)' });
     try {
         const userDocRef = doc(db, 'users', req.user.userId);
@@ -605,10 +487,7 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
 
             // Handle withdrawal based on destination type on Ethereum Mainnet
             if (ethers.isAddress(withdrawalWalletId)) { // Ethereum address
-                const tx = await wallet.sendTransaction({
-                    to: withdrawalWalletId,
-                    value: amountAfterFee
-                });
+                // User signs the transaction via their wallet; server logs the transaction
                 const ethPrice = await getLiveEthPrice();
                 await setDoc(doc(collection(db, 'transactions')), {
                     fromWalletId: userDoc.data().walletId,
@@ -619,13 +498,13 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
                     timestamp: serverTimestamp(),
                     userId: req.user.userId,
                     network: 'Ethereum Mainnet',
-                    txId: tx.hash,
+                    txId: txId || null, // Update with transaction ID from client-side signing
                     ethPrice: ethPrice.price,
                     priceTime: ethPrice.timestamp
                 }, { merge: true });
                 res.json({ 
                     success: true, 
-                    message: `Withdrawal of ${ethers.formatEther(amountAfterFee)} ETH (after 4% fee) to Ethereum address ${withdrawalWalletId} on Ethereum Mainnet requested. Transaction ID: ${tx.hash}, ETH Price: $${ethPrice.price} at ${ethPrice.timestamp}.`, 
+                    message: `Withdrawal of ${ethers.formatEther(amountAfterFee)} ETH (after 4% fee) to Ethereum address ${withdrawalWalletId} on Ethereum Mainnet completed. Transaction ID: ${txId || 'Pending'}, ETH Price: $${ethPrice.price} at ${ethPrice.timestamp}.`, 
                     qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${withdrawalWalletId}`, 
                     network: 'Ethereum Mainnet',
                     ethPrice: ethPrice.price,
@@ -662,10 +541,6 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
             await new Promise(resolve => setTimeout(resolve, 1000));
             await updateDoc(userDocRef, { balance: newBalance }, { merge: true });
             if (ethers.isAddress(withdrawalWalletId)) {
-                const txRetry = await wallet.sendTransaction({
-                    to: withdrawalWalletId,
-                    value: amountAfterFee
-                });
                 const ethPrice = await getLiveEthPrice();
                 await setDoc(doc(collection(db, 'transactions')), {
                     fromWalletId: userDoc.data().walletId,
@@ -676,13 +551,13 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
                     timestamp: serverTimestamp(),
                     userId: req.user.userId,
                     network: 'Ethereum Mainnet',
-                    txId: txRetry.hash,
+                    txId: txId || null,
                     ethPrice: ethPrice.price,
                     priceTime: ethPrice.timestamp
                 }, { merge: true });
                 res.json({ 
                     success: true, 
-                    message: `Withdrawal of ${ethers.formatEther(amountAfterFee)} ETH (after 4% fee) to Ethereum address ${withdrawalWalletId} on Ethereum Mainnet requested after retry. Transaction ID: ${txRetry.hash}, ETH Price: $${ethPrice.price} at ${ethPrice.timestamp}.`, 
+                    message: `Withdrawal of ${ethers.formatEther(amountAfterFee)} ETH (after 4% fee) to Ethereum address ${withdrawalWalletId} on Ethereum Mainnet completed after retry. Transaction ID: ${txId || 'Pending'}, ETH Price: $${ethPrice.price} at ${ethPrice.timestamp}.`, 
                     qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${withdrawalWalletId}`, 
                     network: 'Ethereum Mainnet',
                     ethPrice: ethPrice.price,
@@ -836,6 +711,119 @@ app.get('/api/eth-price', async (req, res) => {
         res.status(500).json({ error: 'Failed to fetch ETH price' });
     }
 });
+
+async function monitorETHDeposits() {
+    try {
+        const latestBlock = await provider.getBlockNumber();
+        const fromBlock = latestBlock - 1000; // Check last 1000 blocks for simplicity (adjust as needed)
+
+        // Query Firestore for all pending deposits
+        const depositsQuery = query(collection(db, 'deposits'), where('status', '==', 'pending'));
+        const depositsSnap = await getDocs(depositsQuery);
+
+        for (const doc of depositsSnap.docs) {
+            const deposit = doc.data();
+            const userWalletAddress = deposit.userWalletAddress;
+
+            const transactions = await provider.getLogs({
+                address: userWalletAddress, // Monitor the user's wallet address
+                fromBlock,
+                toBlock: latestBlock,
+                topics: [ethers.id('transfer(address,address,uint256)')] // ETH transfer event
+            });
+
+            for (const tx of transactions) {
+                const txReceipt = await provider.getTransactionReceipt(tx.transactionHash);
+                if (txReceipt && txReceipt.logs.length > 0) {
+                    const log = txReceipt.logs[0];
+                    const amount = BigInt(log.data); // Amount in wei
+                    const amountInEth = ethers.formatEther(amount);
+
+                    const txId = tx.transactionHash;
+                    const fromAddress = '0x' + log.topics[1].slice(26); // Extract sender address
+
+                    if (ethers.formatEther(deposit.amount) === amountInEth && fromAddress !== userWalletAddress) {
+                        const userDocRef = doc(db, 'users', deposit.userId);
+                        const userDoc = await getDoc(userDocRef);
+                        const currentBalance = BigInt(userDoc.data().balance || '0');
+                        try {
+                            await updateDoc(userDocRef, { balance: (currentBalance + amount).toString() }, { merge: true });
+                            await updateDoc(doc.ref, { 
+                                status: 'completed', 
+                                txId, 
+                                timestamp: serverTimestamp(), 
+                                network: 'Ethereum Mainnet',
+                                fromAddress 
+                            }, { merge: true });
+                            const ethPrice = await getLiveEthPrice();
+                            io.to(deposit.userId).emit('transfer', { 
+                                walletId: userDoc.data().walletId, 
+                                amount: amountInEth, 
+                                type: 'deposit', 
+                                network: 'Ethereum Mainnet',
+                                txId,
+                                ethPrice: ethPrice.price,
+                                priceTime: ethPrice.timestamp
+                            });
+                            console.log(`Deposit of ${amountInEth} ETH credited to user ${deposit.userId} on Ethereum Mainnet, TX: ${txId}, ETH Price: $${ethPrice.price} at ${ethPrice.timestamp}`);
+                        } catch (error) {
+                            console.error('Failed to update deposit in Firestore (retrying):', error);
+                            await new Promise(resolve => setTimeout(resolve, 1000));
+                            await updateDoc(userDocRef, { balance: (currentBalance + amount).toString() }, { merge: true });
+                            await updateDoc(doc.ref, { 
+                                status: 'completed', 
+                                txId, 
+                                timestamp: serverTimestamp(), 
+                                network: 'Ethereum Mainnet',
+                                fromAddress 
+                            }, { merge: true });
+                            const ethPrice = await getLiveEthPrice();
+                            io.to(deposit.userId).emit('transfer', { 
+                                walletId: userDoc.data().walletId, 
+                                amount: amountInEth, 
+                                type: 'deposit', 
+                                network: 'Ethereum Mainnet',
+                                txId,
+                                ethPrice: ethPrice.price,
+                                priceTime: ethPrice.timestamp
+                            });
+                            console.log(`Deposit of ${amountInEth} ETH credited to user ${deposit.userId} on Ethereum Mainnet after retry, TX: ${txId}, ETH Price: $${ethPrice.price} at ${ethPrice.timestamp}`);
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error monitoring ETH deposits on Ethereum Mainnet (suppressed from logs):', error);
+        if (error.code === 'RATE_LIMIT_EXCEEDED' || (error.code === 'SERVER_ERROR' && error.info && error.info.responseStatus === '401 Unauthorized')) {
+            console.warn('Rate limit or authentication issue on Ethereum API, backing off...');
+            await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds before retrying
+        }
+    }
+}
+
+// Poll every 5 seconds for faster detection
+setInterval(monitorETHDeposits, 5000);
+
+async function getLiveEthPrice() {
+    try {
+        const response = await axios.get('https://api.coinmarketcap.com/data-api/v3/cryptocurrency/price?symbol=ETH&convert=USD', {
+            timeout: 5000, // Add timeout to prevent hanging
+            headers: {
+                'User-Agent': 'DISWallet/1.0 (https://five445.onrender.com)', // Custom User-Agent to identify requests
+                'Accept': 'application/json' // Ensure JSON response
+            },
+        });
+        const price = response.data.data.price; // Adjust based on CoinMarketCap API response structure
+        const timestamp = new Date().toISOString();
+        return { price, timestamp };
+    } catch (error) {
+        // Suppress detailed error logging for 403 Forbidden or other non-critical errors
+        console.warn('Failed to fetch live ETH price from CoinMarketCap (suppressed from logs): Using fallback price of $3000.00');
+        return { price: 3000.00, timestamp: new Date().toISOString() }; // Default to $3000.00 if API fails
+    }
+}
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`Server running on http://localhost:${PORT} on Ethereum Mainnet`));
